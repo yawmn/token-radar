@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — pre-token protocols ranked by what their launch is worth</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#board">Skip to the board</a>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <circle cx="16" cy="16" r="15" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/>
+      <circle cx="16" cy="16" r="9.5" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/>
+      <circle cx="16" cy="16" r="4" fill="currentColor" opacity=".85"/>
+      <path d="M16 16 L27.5 6.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+    </svg>
+    <span class="wordmark">Token<span>Radar</span></span>
+  </div>
+  <p class="tagline">Pre-token protocols, ranked by what their launch is worth.</p>
+  <div class="topmeta">
+    <span id="snapshot-label" class="chip">snapshot</span>
+    <span id="model-label" class="chip chip-model">model</span>
+  </div>
+</header>
+
+<main id="board" tabindex="-1" aria-busy="true">
+  <noscript><p class="notice">This dashboard renders its board from the data its program writes beside the page. Turn JavaScript on to read it.</p></noscript>
+</main>
+
+<footer class="foot">
+  <div>
+    <strong>How the implied value is built.</strong>
+    <code>implied = TVL &times; category multiple &times; momentum &times; patience &times; reach</code>
+    The category multiple is the median market cap over TVL that protocols of the same category already trade at, measured from the live-token side of this same snapshot; a category with fewer than three such protocols borrows the whole live field's median. Momentum is the seven-day TVL change, patience is how long the protocol has run with no token of its own, and reach is how many chains it is on.
+  </div>
+  <div class="fine">
+    Every figure comes from the sealed DefiLlama snapshot written beside this page; nothing is fetched, and no protocol is listed or ranked by name. An implied value is a model's claim, not a promise, and not make.fun's.
+  </div>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
