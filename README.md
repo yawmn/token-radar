@@ -1,8 +1,13 @@
 # Token Radar
 
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/yawmn/token-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/yawmn/token-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+
 A launch radar for pre-token DeFi protocols: what a token would be worth if the protocol's record
 stayed as it is, ranked, with the farm plan for each one. Built for make.fun's
-[token launch radar](https://make.fun/c/token-radar-01) bounty.
+[token launch radar](https://make.fun/bounty/token-radar-01) bounty
+([make.fun](https://make.fun)).
 
 Snapshot: **2026-11-14**, 758 protocols at or above $5M TVL, 40 of them on the watchlist.
 The board ranks **198** pre-token protocols — the 40 on the watchlist (`$50M`+ TVL, no token on
