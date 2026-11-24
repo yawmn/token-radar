@@ -361,9 +361,28 @@ table.mini tr:last-child td { border-bottom: 0; }
 }
 
 /* radar-3 fixes: KPI labels may wrap instead of running past their box; the detail
-   view's farm plan is tightened so all seven steps fit in a 900px viewport. */
+   view is tightened so the whole detail — implied value, band, all six why-bullets
+   and all seven farm steps — fits in a 1440x900 viewport with nothing cut off. */
 .kpi span { white-space: normal; line-height: 1.35; }
-.detail-head { padding-bottom: 12px; }
+.detail { gap: 14px; }
+.detail-head { padding-bottom: 10px; }
+.detail-head h1 { font-size: 24px; }
+.detail-head .meta { margin-top: 2px; }
+.detail .card { padding: 12px 16px; }
+.detail .card + .card { margin-top: 10px; }
+.detail .card > p.lede { margin-bottom: 10px; font-size: 12px; line-height: 1.45; }
+.detail .equation { gap: 6px; margin-bottom: 10px; }
+.detail .equation .term { padding: 7px 8px; }
+.detail .equation .term b { font-size: 12.5px; }
+.detail .band { height: 28px; margin: 2px 0 8px; }
+.detail .stats { gap: 6px; }
+.detail .stat { padding: 6px 8px; }
+.detail .stat b { font-size: 13px; }
+.detail .aside-note { font-size: 11px; line-height: 1.45; }
+.detail .drivers li { padding: 5px 0 5px 18px; font-size: 12.5px; line-height: 1.45; }
+.detail .drivers li::before { top: 12px; }
 .card { padding: 14px 18px; }
-.steps li { padding: 8px 0; }
-.steps p { font-size: 12.5px; }
+.steps li { padding: 6px 0; }
+.steps p { font-size: 12px; line-height: 1.45; }
+.steps .cost-inline { color: var(--mute); font: 11px/1.45 var(--mono); }
+.steps .cost { display: flex; gap: 14px; margin-top: 3px; color: var(--mute); font: 11.5px/1.5 var(--mono); }

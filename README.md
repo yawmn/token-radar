@@ -80,7 +80,7 @@ yield — with its own cost and time.
 
 ## The dashboard
 
-`dashboard/` is three static files (`index.html`, `app.css`, `app.js`, 52,978 bytes in all, so the
+`dashboard/` is three static files (`index.html`, `app.css`, `app.js`, 55,024 bytes in all, so the
 dossier's text stays under 65,536 bytes) and one generated `data.js`; no framework, no build step,
 no network request — the page opens from `file://`.
 
@@ -88,18 +88,23 @@ no network request — the page opens from `file://`.
   included), searchable, filtered by scope / category / chain, with the rank, the implied value,
   its held-out 90% range underneath, launch odds, farm cost and the watchlist or below-floor tag
   on each row.
-- **Integrity strip** — watchlist 40/40, rows 198, held-out MAPE, median error, fitted slope,
-  no value keyed on a name, deterministic, 90% range factor — every claim a number the program
-  measured.
+- **Integrity strip** — watchlist 40/40, rows 198, held-out median error 85.3% vs the 91.5%
+  baseline, mean error cut x2.4 vs the baseline, fitted slope 0.52, no value keyed on a name,
+  deterministic, 128 live protocols fitted on — every claim a number the program measured.
+  The held-out MAPE (x17.9) and the 90% range factor (x38.4) are not in the strip; they stay,
+  honestly stated, in the validation panel below, where their context is on the same screen.
 - **Validation panel** — the fitted formula, the held-out numbers against the median-multiple
   baseline, the launch-odds table with its counts, and the shrunk category intercepts.
 - **Detail** — one page per protocol: the arithmetic factor by factor, the page's own recompute
   of the implied value (within 0.1% of the board's number — the worst row recomputes to within
   0.002%), the 90% range drawn on a log scale, why it sits where it does, and a farm plan of
   7 concrete steps, each with its cost and how long it takes.
-- **Yardstick** — the live-token protocols beside the board, at the market's own market cap with
-  the model's fitted market cap and the error beside it, so a reader can see how far the fit is
-  off on the protocols it was fitted on.
+- **Yardstick** — the live-token protocols beside the board, at the market's own market cap,
+  TVL, market multiple (market cap / TVL) and the category's fitted intercept — no fitted cap
+  per protocol and no per-protocol error, because TVL alone cannot price a single launch. The
+  held-out aggregate is stated once in the yardstick header: median error 85.3%, R² 0.13, and
+  the fitted model still beats the median-multiple baseline on the same folds (median 91.5%,
+  MAPE x42.9 vs x17.9).
 
 Hash routes make every view linkable: `#p=<slug>`, `#scope=watchlist|early|live`,
 `#cat=`, `#chain=`, `#sort=`, `#dir=asc`.

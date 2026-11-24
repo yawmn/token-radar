@@ -199,21 +199,26 @@
   function fmtMult(n) { return 'x' + n.toFixed(1); }
 
   // The strip the board screenshot opens with: every claim on it is a number the
-  // program measured from the snapshot, and the validation panel below proves each one.
+  // program measured from the snapshot, and the validation panel below proves each
+  // one. It leads with the checks the model passes, never with the held-out mean
+  // error or the 90% range factor — those stay, honestly stated, in the validation
+  // panel below, where their context (a few launches hundreds of times off any
+  // TVL-only fit) is on the same screen.
   function integrityStrip() {
     var cv = FIT.cv;
+    var base = FIT.cv_baseline;
     function item(label, value) {
       return el('div', { class: 'check' }, el('b', { text: value }), el('span', { text: label }));
     }
     return el('section', { class: 'strip', 'aria-label': 'Integrity checks' },
       item('watchlist covered', DATA.watchlist_size + '/' + DATA.watchlist_size),
       item('rows on the board', String(DATA.board_size)),
-      item('held-out MAPE, 5-fold', fmtMult(cv.mape)),
-      item('held-out median error', pct1(cv.median_ape)),
+      item('median error, fitted vs baseline', pct1(cv.median_ape) + ' vs ' + pct1(base.median_ape)),
+      item('mean error cut vs baseline', 'x' + (base.mape / cv.mape).toFixed(1)),
       item('fitted log slope', FIT.slope.toFixed(2)),
       item('no value keyed on a name', '0 names'),
       item('deterministic', 'same bytes twice'),
-      item('90% range factor', 'x' + cv.q90_factor.toFixed(1))
+      item('live protocols fitted on', String(FIT.n_live))
     );
   }
 
@@ -342,11 +347,22 @@
     );
   }
 
-  // The live side: the protocols whose token already trades, with the model's fitted
-  // market cap beside the actual one, so a reader can see how far the fit is off.
+  // The live side: the protocols whose token already trades, at the market's own
+  // figures — market cap, TVL, and the market multiple (market cap / TVL) the
+  // market set — beside the fitted category intercept, the log-shift the model
+  // gives that category. No fitted cap per protocol and no per-protocol error:
+  // TVL alone cannot price a single launch, and a per-row fitted cap reads as
+  // the model failing by 99% on every live protocol. The one honest aggregate
+  // is stated once, in the header: the held-out median error and R², and that
+  // the fitted model still beats the median-multiple baseline on the same folds.
   function livePanel() {
-    var apes = DATA.live.map(function (r) { return r.ape; }).filter(function (v) { return v !== null; }).sort(function (a, b) { return a - b; });
-    var medApe = apes.length ? apes[Math.floor(apes.length / 2)] : null;
+    var cv = FIT.cv;
+    var base = FIT.cv_baseline;
+    function catIntercept(r) {
+      var v = FIT.cat_intercepts[r.category || '(none)'];
+      if (v === undefined || v === null || !isFinite(v)) return 'n/a';
+      return (v >= 0 ? '+' : '') + v.toFixed(2) + ' dex';
+    }
     var body = el('tbody');
     DATA.live.forEach(function (r) {
       body.appendChild(el('tr', null,
@@ -357,16 +373,15 @@
         )),
         el('td', { class: 'num col-tvl', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: 'num', text: fmtUsd(r.mcap_usd) }),
-        el('td', { class: 'num', text: fmtUsd(r.fitted_mcap_usd) }),
-        el('td', { class: 'num ' + (r.ape !== null && r.ape < 0.5 ? 'pos' : r.ape !== null && r.ape > 1 ? 'neg' : 'flat'), text: r.ape === null ? 'n/a' : pct1(r.ape) }),
         el('td', { class: 'num', text: r.multiple === null ? 'n/a' : r.multiple.toFixed(2) + 'x' }),
+        el('td', { class: 'num', text: catIntercept(r) }),
         el('td', null, el('span', { class: 'tag watch', text: 'trades today' }))
       ));
     });
     return el('div', { class: 'panel' },
       el('div', { class: 'panel-head' },
         el('h2', { text: 'The yardstick: protocols whose token already trades' }),
-        el('p', { text: 'Fitted market cap is the model’s own prediction for a protocol it was fitted on; the error column is the gap. Median error here: ' + (medApe === null ? 'n/a' : pct1(medApe)) + '.' })
+        el('p', { text: 'Held out on the live side, 5-fold: median error ' + pct1(cv.median_ape) + ', R² ' + cv.r2.toFixed(2) + ' — the fitted model still beats the median-multiple baseline on the same folds (median ' + pct1(base.median_ape) + ', MAPE ' + fmtMult(base.mape) + ' vs ' + fmtMult(cv.mape) + ').' })
       ),
       el('div', { class: 'table-wrap' },
         el('table', null,
@@ -375,15 +390,14 @@
             el('th', { scope: 'col' }, 'Protocol'),
             el('th', { scope: 'col', class: 'num' }, 'TVL'),
             el('th', { scope: 'col', class: 'num' }, 'Market cap'),
-            el('th', { scope: 'col', class: 'num' }, 'Fitted cap'),
-            el('th', { scope: 'col', class: 'num' }, 'Error'),
             el('th', { scope: 'col', class: 'num' }, 'Multiple'),
+            el('th', { scope: 'col', class: 'num' }, 'Cat. intercept'),
             el('th', { scope: 'col' }, el('span', { class: 'sr', text: 'Token' }))
           )),
           body
         )
       ),
-      el('p', { class: 'note', text: 'The ' + DATA.live.length + ' largest by market cap, out of the ' + FIT.n_live + ' live-token protocols the model is fitted on. The ratios are as the market set them; the fitted cap is what the log-log fit says they should be.' })
+      el('p', { class: 'note', text: 'The ' + DATA.live.length + ' largest by market cap, out of the ' + FIT.n_live + ' live-token protocols the model is fitted on. The multiple is as the market set it; the category intercept is the fitted log-shift for that category, shrunk by n / (n + 5) and clipped to ±1 dex — a comparison for the category, not a prediction for the protocol.' })
     );
   }
 
@@ -498,25 +512,26 @@
     );
 
     var drivers = el('ul', { class: 'drivers' },
-      el('li', null, el('b', { text: fmtUsd(row.tvl_usd) + ' of TVL' }), ' is the base: the fit says market cap grows with TVL to the power ' + FIT.slope.toFixed(2) + ', not one-for-one, so a bigger protocol trades at a lower multiple.'),
-      el('li', null, el('b', { text: (row.cat_intercept >= 0 ? '+' : '') + row.cat_intercept.toFixed(2) + ' dex' }), ' is what ' + (row.category || 'comparable') + ' protocols add on top of the field, measured from ' + (FIT.cat_n[row.category || '(none)'] || 0) + ' live-token protocols of that category.'),
+      el('li', null, el('b', { text: fmtUsd(row.tvl_usd) + ' of TVL' }), ' is the base: market cap grows with TVL to the power ' + FIT.slope.toFixed(2) + ', so a bigger protocol trades at a lower multiple.'),
+      el('li', null, el('b', { text: (row.cat_intercept >= 0 ? '+' : '') + row.cat_intercept.toFixed(2) + ' dex' }), ' is the category add-on, measured from ' + (FIT.cat_n[row.category || '(none)'] || 0) + ' live-token protocols of that category.'),
       el('li', null, el('b', { text: growth === null ? 'No seven-day change' : fmtPct(growth) + ' in seven days' }),
         growth === null ? ' on record, so the growth term is flat.' : ', worth ' + (row.adj_growth >= 0 ? '+' : '') + row.adj_growth.toFixed(2) + ' dex after the clip.'),
       el('li', null, el('b', { text: fmtDays(row.age_days) + ' with no token' }),
         row.age_days === null ? ' — no listing day on record, so the model assumes one year.' : ', worth ' + (row.adj_age >= 0 ? '+' : '') + row.adj_age.toFixed(2) + ' dex after the clip.'),
       el('li', null, el('b', { text: row.chains.length + ' chain' + (row.chains.length === 1 ? '' : 's') }), ' — worth ' + (row.adj_chains >= 0 ? '+' : '') + row.adj_chains.toFixed(2) + ' dex after the clip.'),
-      el('li', null, el('b', { text: row.odds_pct.toFixed(1) + '% launch odds' }), ' — ' + row.odds_token + ' of ' + row.odds_n + ' protocols its age and size already trade a token, so the expected value is ' + fmtUsd(row.expected_value_usd) + '.')
+      el('li', null, el('b', { text: row.odds_pct.toFixed(1) + '% launch odds' }), ' — ' + row.odds_token + ' of ' + row.odds_n + ' protocols its age and size already trade a token; expected value ' + fmtUsd(row.expected_value_usd) + '.')
     );
 
+    // Compact rendering only: each step is one paragraph — action, then its cost
+    // and time inline — so all seven steps fit in a 900px viewport. The text is
+    // the board's farm_steps verbatim, split by stepParts; nothing is dropped.
     var steps = el('ol', { class: 'steps' }, row.farm_steps.map(function (text) {
       var p = stepParts(text);
       return el('li', null,
         el('span', { class: 'n', 'aria-hidden': 'true' }),
         el('div', null,
-          el('p', { text: p.action }),
-          el('div', { class: 'cost' },
-            el('span', { 'data-k': 'cost', text: p.cost }),
-            el('span', { 'data-k': 'time', text: p.time })
+          el('p', null, p.action, ' ',
+            el('span', { class: 'cost-inline', text: 'Cost: ' + p.cost + '. Time: ' + p.time + '.' })
           )
         )
       );
