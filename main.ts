@@ -63,7 +63,26 @@ const meta = {
   early_below_floor: radar.early_size,
   live_token_protocols: radar.live_size,
   protocols_in_snapshot: radar.protocols_seen,
-  multiple_basis: 'median market cap over TVL of the category\'s live-token protocols',
+  // radar-3: the fitted log-log model, measured from the snapshot's live side, not assumed.
+  fitted_model: {
+    n_live: radar.fit.n_live,
+    slope_log10_mcap_on_log10_tvl: radar.fit.slope,
+    intercept: radar.fit.intercept,
+    r2_in_sample_log: radar.fit.r2_in_sample,
+    resid_coefs_growth_logage_chains: radar.fit.resid_coefs,
+    category_intercept_shrink_k: radar.fit.shrink_k,
+  },
+  held_out_validation_5fold_by_slug: {
+    mape: radar.fit.cv.mape,
+    median_ape: radar.fit.cv.median_ape,
+    r2_log: radar.fit.cv.r2,
+    conformal_q90_log: radar.fit.cv.q90_log,
+    conformal_q90_factor: radar.fit.cv.q90_factor,
+    interval_width_factor: radar.fit.cv.interval_width_factor,
+  },
+  interval_method: '90% conformal: implied / F to implied * F, F from the 5-fold held-out absolute log errors',
+  odds_method: 'Laplace-smoothed token rate by age bucket x TVL tier, (token + 1) / (n + 2); see odds in data.js',
+  multiple_basis: 'fitted log10(mcap) on log10(TVL) with a shrunk per-category intercept, not a median ratio',
 };
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board, meta }, null, 0)}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
@@ -104,9 +123,12 @@ for (const name of shots) {
 writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: DASHBOARD_CAPS }));
 
 const top = board[0]!;
+const fit = radar.fit;
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols read, ${snapshot.watchlist.length} on the watchlist, ` +
     `${board.length} pre-token rows scored (${radar.early_size} below the floor, ${radar.live_size} live-token protocols set aside)\n` +
-    `token radar: rank 1 is ${top.name} at $${top.implied_value_usd.toLocaleString('en-US')} implied, ${top.multiple}x its TVL\n` +
+    `token radar: radar-3 fit on ${fit.n_live} live protocols: log10(mcap) = ${fit.intercept} + ${fit.slope} x log10(TVL), R2 ${fit.r2_in_sample}\n` +
+    `token radar: held-out 5-fold: MAPE x${fit.cv.mape}, median error ${(fit.cv.median_ape * 100).toFixed(1)}%, 90% range factor x${fit.cv.q90_factor}\n` +
+    `token radar: rank 1 is ${top.name} at $${top.implied_value_usd.toLocaleString('en-US')} implied, ${top.multiple}x its TVL, ${top.odds_pct}% launch odds\n` +
     `token radar: wrote board.json, data.js, dashboard/ (3 files), screenshots/ (${shots.length} images) and dossier.json to ${out}\n`,
 );

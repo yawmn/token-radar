@@ -322,3 +322,48 @@ tr:nth-child(-n+3) .rank { color: var(--mint); border-color: var(--mint-dim); ba
   .hero h1 { font-size: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------------------------------------------------------------- radar-3: integrity strip, validation, odds */
+
+.strip {
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px;
+  margin-bottom: 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--line-soft); overflow: hidden;
+}
+.check { background: var(--panel); padding: 9px 11px; }
+.check b { display: block; font: 600 14px/1.3 var(--mono); color: var(--mint); white-space: nowrap; }
+.check span { display: block; margin-top: 1px; color: var(--mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.check b::before { content: "\2713  "; color: var(--mint-dim); }
+
+.implied-val { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.implied-val b { font: 600 13.5px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.interval { color: var(--mute); font: 10.5px/1.3 var(--mono); white-space: nowrap; }
+td.odds { color: var(--amber); font-weight: 600; }
+
+.validation { margin-top: 16px; }
+.valid-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; padding: 14px 16px; }
+.valid-grid h3 { margin: 0 0 8px; font-size: 12.5px; font-weight: 650; }
+table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.mini th { text-align: left; color: var(--mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); }
+table.mini td { padding: 5px 6px 5px 0; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); }
+table.mini td.num, table.mini th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+table.mini tr:last-child td { border-bottom: 0; }
+.cats { margin: 0; padding: 0; list-style: none; }
+.cats li { padding: 5px 0; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--ink-2); }
+.cats li:last-child { border-bottom: 0; }
+.cats li b { font-family: var(--mono); color: var(--mint); }
+.cats li.low b { color: var(--amber); }
+.validation .note { margin-top: 10px; }
+
+@media (max-width: 1180px) {
+  .strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .valid-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* radar-3 fixes: KPI labels may wrap instead of running past their box; the detail
+   view's farm plan is tightened so all seven steps fit in a 900px viewport. */
+.kpi span { white-space: normal; line-height: 1.35; }
+.detail-head { padding-bottom: 12px; }
+.card { padding: 14px 18px; }
+.steps li { padding: 8px 0; }
+.steps p { font-size: 12.5px; }

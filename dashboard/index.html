@@ -33,8 +33,8 @@
 <footer class="foot">
   <div>
     <strong>How the implied value is built.</strong>
-    <code>implied = TVL &times; category multiple &times; momentum &times; patience &times; reach</code>
-    The category multiple is the median market cap over TVL that protocols of the same category already trade at, measured from the live-token side of this same snapshot; a category with fewer than three such protocols borrows the whole live field's median. Momentum is the seven-day TVL change, patience is how long the protocol has run with no token of its own, and reach is how many chains it is on.
+    <code>log10(market cap) = intercept + slope x log10(TVL) + category intercept + growth, age and chain terms</code>
+    The slope and intercept are fitted by OLS on the 128 live-token protocols of this same snapshot; a category's intercept is its mean log-residual, shrunk by n / (n + 5). The 90% range is conformal, from 5-fold held-out errors. Launch odds are the Laplace-smoothed share of protocols of the same age and size that already trade a token.
   </div>
   <div class="fine">
     Every figure comes from the sealed DefiLlama snapshot written beside this page; nothing is fetched, and no protocol is listed or ranked by name. An implied value is a model's claim, not a promise, and not make.fun's.
