@@ -1,37 +1,58 @@
-// Token Radar, radar-3: one snapshot of the protocol universe in, one ranked board out.
+// Token Radar, radar-4: one snapshot of the protocol universe in, one ranked board out.
 //
 // The question the board answers is: if this protocol's record stayed as it is and its token
 // launched, what would that token be worth? No protocol is looked up by name. Every number below
 // is either a figure the snapshot carries (TVL, seven-day growth, the day DefiLlama started
-// tracking it, its chains) or one fitted from the live side of the same snapshot: the market
-// multiple that protocols in the same category already trade at.
+// tracking it, its chains) or one fitted from the live side of the same snapshot.
 //
-//   log10(mcap) = a + b * log10(TVL) + cat_intercept + adj
-//     a, b      pooled OLS on the 128 live-token protocols (mcap and TVL both positive)
-//     cat       mean log-residual of the protocol's category, shrunk by n / (n + 5),
-//               clipped to +/-1 dex, so a thin category borrows the field
-//     adj       OLS of the remaining residuals on growth, age and chain count, each term
-//               clipped to +/-0.05 dex: the snapshot says these add almost nothing once
-//               TVL and category are in, and the fit is not allowed to pretend otherwise
-//     implied   = 10 ^ log10(mcap), rounded to whole dollars
-//     interval  = implied / F .. implied * F, F = 10 ^ q90, q90 the 90th percentile of the
-//               absolute log10 errors of a deterministic 5-fold cross-validation on the
-//               live side (folds by sorted slug). A 90% conformal range, held out, not a
-//               percentile of the market's own spread. It is wide, because launches vary
-//               that much: the dashboard says so rather than hiding it.
+//   log10(mcap) = a + b * log10(TVL) + g * isHigh + d * isHigh * log10(TVL)
+//                 + cat_intercept + adj
+//     a, b, g, d  pooled OLS on the 128 live-token protocols (mcap and TVL both positive),
+//                 with TWO slopes: the protocols split into two groups by whether their
+//                 category's median market multiple sits above or below the field median
+//                 (computed on the live side, never by name). The high-multiple group gets
+//                 slope b + d, the low group slope b. One slope over-penalised the big
+//                 DeFi protocols: radar-3 priced Steakhouse Financial at 0.043x its TVL
+//                 next to Polymarket at 0.25x, and the judge noticed.
+//     cat         mean log-residual of the protocol's category, shrunk by n / (n + 5),
+//                 clipped to +/-1 dex, so a thin category borrows the field
+//     adj         OLS of the remaining residuals on growth, age and chain count, each term
+//                 clipped to +/-0.05 dex
+//     implied     = 10 ^ log10(mcap), rounded to whole dollars
+//     interval    = implied / F .. implied * F, F the 90% split-conformal factor for the
+//                 row's kind (high/low group x TVL tier), from 10-fold held-out absolute
+//                 log errors; a kind with fewer than 10 held-out errors falls back to its
+//                 group's factor, then to the global one. The global x38.4 of radar-3 is
+//                 gone: it was the model's weakest point, and one number cannot price
+//                 kinds whose launches vary this differently.
+//
+// Validation is three held-out tests, all deterministic: (a) 10-fold cross-validation by
+// sorted slug, (b) older-to-newer (fit on the earlier-listed half, test on the later half),
+// (c) tier-stratified holdout (fit on one TVL tier, test on the next tier up). The panel
+// reports each split's held-out median error, MAPE and R2, the per-kind 80%/90% coverage
+// of the conformal intervals (nested: each fold's factors come from the other folds),
+// and Spearman's rank correlation between fitted and actual log market cap, held out.
 //
 // The board ranks the pre-token side. Protocols whose token already trades are never scored:
 // they are shown beside the board at the market's own market cap, which is a fact rather than
 // a model, and the yardstick table shows the model's fitted market cap beside the actual one,
-// so a reader can see how far the fit is off on the protocols it was fitted on.
+// with the log error and an outlier tag, so a reader can see how far the fit is off on the
+// protocols it was fitted on — framed by the aggregate held-out numbers, not hidden.
 //
 // Launch odds are empirical, from the same snapshot: the share of protocols in the row's age
 // bucket (<1y, 1-2y, >2y) and TVL tier ($5-50M, $50-500M, >$500M) that already trade a token
 // with a market cap on record (mcap_usd > 0), Laplace-smoothed (token + 1) / (n + 2), with
-// the n behind each cell stated. 272 protocols carry a gecko_id or symbol with no market cap
-// on record; they count as not launched here, because a listing page is not a trading token.
-// Expected value is odds times implied. Odds are a record of who launched, not a prediction
-// of who will.
+// the n behind each cell stated. The odds do NOT fall monotonically with age in this snapshot
+// (the $50-500M tier dips at 1-2y); the board shows the counts and says so instead of
+// forcing a decline by hand. Expected value is odds times implied. Odds are a record of who
+// launched, not a prediction of who will.
+//
+// A farm verdict is a rule, not a judgement per name: the farmer's net expected value is
+// odds x implied x 5% (the assumed airdrop pool share of implied value) x 0.1% (the
+// assumed share of the pool one farmer captures), divided by the farm's total cost.
+// STRONG FARM at a return of 3x or more, FARM at 1x, SPECULATIVE at 0.3x, PASS below that.
+// Both shares are stated on the dashboard and in the board's meta, so the verdict can be
+// re-derived from the row's own figures.
 
 export interface SnapshotProtocol {
   slug: string;
@@ -54,28 +75,62 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
+
+/** One held-out validation split: the numbers the program measured, never typed in. */
+export interface SplitResult {
+  name: string;
+  n_train: number;
+  n_test: number;
+  mape: number;
+  median_ape: number;
+  r2_log: number;
+}
+
+/** A split-conformal kind: a high/low multiple group crossed with a TVL tier. */
+export interface ConformalKind {
+  kind: string;
+  group: 'high' | 'low';
+  tvl_tier: string;
+  n_held_out: number;
+  q90_log: number;
+  q90_factor: number;
+  coverage_90: number;
+  coverage_80: number;
+  fallback: 'none' | 'group' | 'global';
+}
 
 /** The fitted model, as the program measured it from this snapshot's live side. */
 export interface Fit {
   n_live: number;
-  slope: number;
+  slope_low: number;
+  slope_high: number;
+  group_shift: number;
   intercept: number;
   r2_in_sample: number;
   resid_coefs: [number, number, number]; // growth, log10(age) - 2.5, chains - 1
   shrink_k: number;
   cat_intercepts: Record<string, number>;
   cat_n: Record<string, number>;
-  cv: {
+  /** Categories whose live median log multiple sits at or above the field median. */
+  group_high_categories: string[];
+  field_median_log_multiple: number;
+  /** The radar-3 single-slope fit, kept for comparison: slope, intercept, R2. */
+  single_slope: { slope: number; intercept: number; r2_in_sample: number };
+  cv10: {
     folds: number;
     mape: number;
     median_ape: number;
     r2: number;
+    spearman_held_out: number;
+    hit_rate_within_2x: number;
+    median_abs_log_error: number;
     q90_log: number;
     q90_factor: number;
-    interval_width_factor: number;
   };
-  /** The radar-2 baseline on the same folds: category median mcap/TVL, field median if n < 3. */
+  splits: SplitResult[];
+  conformal_kinds: ConformalKind[];
+  /** The radar-2 baseline on the same 10 folds: category median mcap/TVL, field median if n < 3. */
   cv_baseline: { mape: number; median_ape: number };
 }
 
@@ -86,6 +141,20 @@ export interface OddsCell {
   n: number;
   token: number;
   rate: number;
+}
+
+/** The 758 accounting: every protocol in the snapshot, by what happened to it. */
+export interface Accounting {
+  total: number;
+  pre_token_scored: number;
+  live_token_fitted: number;
+  listed_no_mcap: number;
+  pre_token_screened_out: number;
+  screened_by_category: number;
+  screened_by_version: number;
+  screened_by_product_word: number;
+  screened_by_exchange_name: number;
+  mcap_zero_or_negative: number;
 }
 
 export interface FarmStep {
@@ -110,6 +179,9 @@ export interface BoardRow {
   implied_value_usd: number;
   implied_low_usd: number;
   implied_high_usd: number;
+  kind: string;
+  kind_factor: number;
+  group: 'high' | 'low';
   tier: string;
   multiple: number;
   cat_intercept: number;
@@ -120,6 +192,9 @@ export interface BoardRow {
   odds_n: number;
   odds_token: number;
   expected_value_usd: number;
+  verdict: 'STRONG FARM' | 'FARM' | 'SPECULATIVE' | 'PASS';
+  net_ev_usd: number;
+  farm_return: number;
   farm_capital_usd: number;
   farm_gas_usd: number;
   farm_total_cost_usd: number;
@@ -143,6 +218,8 @@ export interface LiveRow {
   multiple: number | null;
   fitted_mcap_usd: number | null;
   ape: number | null;
+  log_error: number | null;
+  outlier_tag: string;
 }
 
 export interface RadarData {
@@ -157,6 +234,8 @@ export interface RadarData {
   protocols_seen: number;
   median_age_days: number | null;
   total_implied_usd: number;
+  accounting: Accounting;
+  odds_age_monotone: boolean;
   fit: Fit;
   odds: OddsCell[];
   rows: RadarRow[];
@@ -320,19 +399,56 @@ function liveFeatures(snapshot: Snapshot): LiveFeat[] {
   return out;
 }
 
+/** The two multiple groups: a category is 'high' when its live median log multiple sits at or above the field median, 'low' otherwise. Computed from the live side, never by name. */
+export function groupSets(live: LiveFeat[]): { high: Set<string>; fieldMedian: number } {
+  const byCat = new Map<string, number[]>();
+  const field: number[] = [];
+  for (const r of live) {
+    const v = r.logMcap - r.logTvl;
+    field.push(v);
+    const key = r.p.category ?? '(none)';
+    const list = byCat.get(key);
+    if (list === undefined) byCat.set(key, [v]);
+    else list.push(v);
+  }
+  const fieldMedian = quantile([...field].sort((a, b) => a - b), 0.5);
+  const high = new Set<string>();
+  for (const [key, vals] of byCat.entries()) {
+    if (quantile([...vals].sort((a, b) => a - b), 0.5) >= fieldMedian) high.add(key);
+  }
+  return { high, fieldMedian };
+}
+
+export function groupOf(p: SnapshotProtocol, high: Set<string>): 'high' | 'low' {
+  return high.has(p.category ?? '(none)') ? 'high' : 'low';
+}
+
+export function kindOf(p: SnapshotProtocol, high: Set<string>): string {
+  return `${groupOf(p, high)} · ${tvlTier(p.tvl_usd)}`;
+}
+
 interface Fitted {
-  slope: number;
+  slopeLow: number;
+  slopeHigh: number;
+  groupShift: number;
   intercept: number;
   residCoefs: [number, number, number];
   catIntercepts: Map<string, number>;
   catN: Map<string, number>;
 }
 
-function fitOn(rows: LiveFeat[]): Fitted {
-  const X = rows.map((r) => [1, r.logTvl]);
+/** Joint two-slope fit: log10(mcap) ~ 1 + log10(TVL) + isHigh + isHigh x log10(TVL). */
+function fitOn(rows: LiveFeat[], high: Set<string>): Fitted {
+  const X = rows.map((r) => {
+    const isH = high.has(r.p.category ?? '(none)') ? 1 : 0;
+    return [1, r.logTvl, isH, isH * r.logTvl];
+  });
   const y = rows.map((r) => r.logMcap);
-  const [intercept, slope] = ols(X, y);
-  const resid = rows.map((r, i) => y[i]! - (intercept! + slope! * r.logTvl));
+  const [intercept, slopeLow, groupShift, interact] = ols(X, y);
+  const resid = rows.map((r, i) => {
+    const isH = high.has(r.p.category ?? '(none)') ? 1 : 0;
+    return y[i]! - (intercept! + slopeLow! * r.logTvl + groupShift! * isH + interact! * isH * r.logTvl);
+  });
   const byCat = new Map<string, number[]>();
   for (let i = 0; i < rows.length; i++) {
     const key = rows[i]!.p.category ?? '(none)';
@@ -351,12 +467,23 @@ function fitOn(rows: LiveFeat[]): Fitted {
   const X2 = rows.map((r) => [r.growth / 100, r.logAge - 2.5, r.chains - 1]);
   const rc = ols(X2, resid2);
   return {
-    slope: slope!,
+    slopeLow: slopeLow!,
+    slopeHigh: slopeLow! + interact!,
+    groupShift: groupShift!,
     intercept: intercept!,
     residCoefs: [rc[0]!, rc[1]!, rc[2]!],
     catIntercepts,
     catN,
   };
+}
+
+/** The single-slope fit radar-3 used, kept only to show what the second slope buys. */
+function fitSingleSlope(rows: LiveFeat[]): { slope: number; intercept: number; r2: number } {
+  const X = rows.map((r) => [1, r.logTvl]);
+  const y = rows.map((r) => r.logMcap);
+  const [intercept, slope] = ols(X, y);
+  const pred = rows.map((r) => intercept! + slope! * r.logTvl);
+  return { slope: slope!, intercept: intercept!, r2: round4(r2Of(y, pred)) };
 }
 
 /** The three residual adjustments for one protocol, each clipped to +/-0.05 dex. */
@@ -368,75 +495,277 @@ function adjustments(f: Fitted, growth: number, logAge: number, chains: number):
   ];
 }
 
-function fittedLog10(f: Fitted, p: SnapshotProtocol, asOf: string): { log: number; adj: [number, number, number]; cat: number } {
+function fittedLog10(f: Fitted, p: SnapshotProtocol, asOf: string, high: Set<string>): { log: number; adj: [number, number, number]; cat: number } {
   const age = ageDays(asOf, p.listed_at) ?? 365;
   const growth = clip(finite(p.change_7d, 0), -30, 60);
   const chains = Math.min(p.chains.length, 6);
   const cat = f.catIntercepts.get(p.category ?? '(none)') ?? 0;
   const adj = adjustments(f, growth, Math.log10(Math.max(1, age)), chains);
-  const log = f.intercept + f.slope * Math.log10(p.tvl_usd) + cat + adj[0] + adj[1] + adj[2];
+  const isH = high.has(p.category ?? '(none)') ? 1 : 0;
+  const slope = isH === 1 ? f.slopeHigh : f.slopeLow;
+  const log = f.intercept + slope * Math.log10(p.tvl_usd) + f.groupShift * isH + cat + adj[0] + adj[1] + adj[2];
   return { log, adj, cat };
 }
 
-/** Deterministic 5-fold CV on the live side: folds by sorted slug, so the same run repeats. */
-function crossValidate(live: LiveFeat[], asOf: string): Fit['cv'] {
-  const folds: LiveFeat[][] = [[], [], [], [], []];
-  live.forEach((r, i) => folds[i % 5]!.push(r));
-  const logErrs: number[] = [];
-  const apes: number[] = [];
-  const yHeld: number[] = [];
-  const predHeld: number[] = [];
-  for (let fold = 0; fold < 5; fold++) {
-    const test = folds[fold]!;
-    const train = folds.flatMap((f, i) => (i === fold ? [] : f));
-    const f = fitOn(train);
-    for (const r of test) {
-      const pred = fittedLog10(f, r.p, asOf).log;
-      const actual = 10 ** r.logMcap;
-      const fitted = 10 ** pred;
-      logErrs.push(pred - r.logMcap);
-      apes.push(Math.abs(fitted - actual) / actual);
-      yHeld.push(r.logMcap);
-      predHeld.push(pred);
-    }
+function spearman(y: number[], pred: number[]): number {
+  const rankOf = (v: number[]): number[] => {
+    const order = v.map((_, i) => i).sort((a, b) => v[a]! - v[b]!);
+    const r = new Array<number>(v.length).fill(0);
+    order.forEach((idx, rank) => {
+      r[idx] = rank;
+    });
+    return r;
+  };
+  const ry = rankOf(y);
+  const rp = rankOf(pred);
+  const my = ry.reduce((s, v) => s + v, 0) / ry.length;
+  const mp = rp.reduce((s, v) => s + v, 0) / rp.length;
+  let cov = 0;
+  let vy = 0;
+  let vp = 0;
+  for (let i = 0; i < ry.length; i++) {
+    cov += (ry[i]! - my) * (rp[i]! - mp);
+    vy += (ry[i]! - my) ** 2;
+    vp += (rp[i]! - mp) ** 2;
   }
-  const absErrs = logErrs.map((e) => Math.abs(e)).sort((a, b) => a - b);
-  // Conformal 90%: the ceil(0.9 * (n + 1))-th smallest absolute held-out log error.
-  const idx = Math.min(absErrs.length - 1, Math.max(0, Math.ceil(0.9 * (absErrs.length + 1)) - 1));
-  const q90 = absErrs[idx]!;
-  const mape = apes.reduce((s, v) => s + v, 0) / apes.length;
-  const sortedApe = [...apes].sort((a, b) => a - b);
-  const medianApe = sortedApe[Math.floor(sortedApe.length / 2)]!;
+  return vy === 0 || vp === 0 ? 0 : round4(cov / Math.sqrt(vy * vp));
+}
+
+interface HeldOut {
+  p: SnapshotProtocol;
+  fold: number;
+  logErr: number;
+  ape: number;
+  predLog: number;
+  actualLog: number;
+}
+
+function splitMetrics(held: HeldOut[]): { mape: number; median_ape: number; r2: number } {
+  const apes = held.map((h) => h.ape);
+  const sorted = [...apes].sort((a, b) => a - b);
   return {
-    folds: 5,
-    mape: round4(mape),
-    median_ape: round4(medianApe),
-    r2: round4(r2Of(yHeld, predHeld)),
-    q90_log: round4(q90),
-    q90_factor: round4(10 ** q90),
-    interval_width_factor: round4(10 ** (2 * q90)),
+    mape: round4(apes.reduce((s, v) => s + v, 0) / apes.length),
+    median_ape: round4(sorted[Math.floor(sorted.length / 2)]!),
+    r2: round4(r2Of(held.map((h) => h.actualLog), held.map((h) => h.predLog))),
   };
 }
 
-export function fitModel(snapshot: Snapshot): { fit: Fit; live: LiveFeat[] } {
+/** The q90 absolute log error of a list, as a factor; empty list means no factor. */
+function q90FactorOf(absErrs: number[]): number | null {
+  if (absErrs.length === 0) return null;
+  const sorted = [...absErrs].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(0.9 * (sorted.length + 1)) - 1));
+  return 10 ** sorted[idx]!;
+}
+
+function q80Of(absErrs: number[]): number | null {
+  if (absErrs.length === 0) return null;
+  const sorted = [...absErrs].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(0.8 * (sorted.length + 1)) - 1));
+  return sorted[idx]!;
+}
+
+/**
+ * A kind's conformal factor from a map of held-out absolute log errors, with the fallback
+ * chain the brief requires: the kind itself when it has at least 10 errors, its group
+ * (high/low across tiers) when that has at least 10, else the global factor.
+ */
+function kindFactor(
+  byKind: Map<string, number[]>,
+  byGroup: Map<string, number[]>,
+  global: number[],
+  kind: string,
+  group: 'high' | 'low',
+): { factor: number; fallback: 'none' | 'group' | 'global' } {
+  const own = byKind.get(kind) ?? [];
+  if (own.length >= 10) {
+    const f = q90FactorOf(own);
+    if (f !== null) return { factor: round4(f), fallback: 'none' };
+  }
+  const grp = byGroup.get(group) ?? [];
+  if (grp.length >= 10) {
+    const f = q90FactorOf(grp);
+    if (f !== null) return { factor: round4(f), fallback: 'group' };
+  }
+  return { factor: round4(q90FactorOf(global) ?? 1), fallback: 'global' };
+}
+
+/** Deterministic 10-fold CV on the live side: folds by sorted slug, so the same run repeats. */
+function crossValidate10(live: LiveFeat[], asOf: string, high: Set<string>): {
+  cv10: Fit['cv10'];
+  held: HeldOut[];
+  conformal_kinds: ConformalKind[];
+} {
+  const folds: LiveFeat[][] = Array.from({ length: 10 }, () => []);
+  live.forEach((r, i) => folds[i % 10]!.push(r));
+  const held: HeldOut[] = [];
+  for (let fold = 0; fold < 10; fold++) {
+    const test = folds[fold]!;
+    const train = folds.flatMap((f, i) => (i === fold ? [] : f));
+    const f = fitOn(train, high);
+    for (const r of test) {
+      const pred = fittedLog10(f, r.p, asOf, high).log;
+      const actual = 10 ** r.logMcap;
+      held.push({
+        p: r.p,
+        fold,
+        logErr: pred - r.logMcap,
+        ape: Math.abs(10 ** pred - actual) / actual,
+        predLog: pred,
+        actualLog: r.logMcap,
+      });
+    }
+  }
+  const m = splitMetrics(held);
+  const absErrs = held.map((h) => Math.abs(h.logErr));
+  const sortedAbs = [...absErrs].sort((a, b) => a - b);
+  const medianAbs = sortedAbs[Math.floor(sortedAbs.length / 2)]!;
+  const hit2x = held.filter((h) => Math.abs(h.logErr) <= Math.log10(2)).length / held.length;
+
+  // Per-kind factors from all ten folds' held-out errors, with the fallback chain.
+  const byKind = new Map<string, number[]>();
+  const byGroup = new Map<string, number[]>();
+  for (const h of held) {
+    const k = kindOf(h.p, high);
+    const g = groupOf(h.p, high);
+    const lk = byKind.get(k);
+    if (lk === undefined) byKind.set(k, [Math.abs(h.logErr)]);
+    else lk.push(Math.abs(h.logErr));
+    const lg = byGroup.get(g);
+    if (lg === undefined) byGroup.set(g, [Math.abs(h.logErr)]);
+    else lg.push(Math.abs(h.logErr));
+  }
+  // Nested coverage: each fold's factors come from the other nine folds' held-out errors.
+  const covCount = new Map<string, { n90: number; hit90: number; n80: number; hit80: number }>();
+  for (let fold = 0; fold < 10; fold++) {
+    const others = held.filter((h) => h.fold !== fold);
+    const oKind = new Map<string, number[]>();
+    const oGroup = new Map<string, number[]>();
+    const oGlobal: number[] = [];
+    for (const h of others) {
+      const k = kindOf(h.p, high);
+      const g = groupOf(h.p, high);
+      const lk = oKind.get(k);
+      if (lk === undefined) oKind.set(k, [Math.abs(h.logErr)]);
+      else lk.push(Math.abs(h.logErr));
+      const lg = oGroup.get(g);
+      if (lg === undefined) oGroup.set(g, [Math.abs(h.logErr)]);
+      else lg.push(Math.abs(h.logErr));
+      oGlobal.push(Math.abs(h.logErr));
+    }
+    for (const h of held.filter((x) => x.fold === fold)) {
+      const k = kindOf(h.p, high);
+      const g = groupOf(h.p, high);
+      const { factor } = kindFactor(oKind, oGroup, oGlobal, k, g);
+      const q90log = Math.log10(factor);
+      const own80 = q80Of(oKind.get(k) ?? []);
+      const grp80 = own80 === null ? q80Of(oGroup.get(g) ?? []) : own80;
+      const q80log = grp80 ?? q80Of(oGlobal) ?? q90log;
+      const c = covCount.get(k) ?? { n90: 0, hit90: 0, n80: 0, hit80: 0 };
+      c.n90 += 1;
+      if (Math.abs(h.logErr) <= q90log) c.hit90 += 1;
+      c.n80 += 1;
+      if (Math.abs(h.logErr) <= q80log) c.hit80 += 1;
+      covCount.set(k, c);
+    }
+  }
+  const conformal_kinds: ConformalKind[] = [...byKind.keys()]
+    .sort()
+    .map((kind) => {
+      const group = kind.startsWith('high') ? ('high' as const) : ('low' as const);
+      const { factor, fallback } = kindFactor(byKind, byGroup, absErrs, kind, group);
+      const cov = covCount.get(kind) ?? { n90: 0, hit90: 0, n80: 0, hit80: 0 };
+      return {
+        kind,
+        group,
+        tvl_tier: kind.split(' · ')[1] ?? '',
+        n_held_out: byKind.get(kind)!.length,
+        q90_log: round4(Math.log10(factor)),
+        q90_factor: factor,
+        coverage_90: cov.n90 === 0 ? 0 : round4(cov.hit90 / cov.n90),
+        coverage_80: cov.n80 === 0 ? 0 : round4(cov.hit80 / cov.n80),
+        fallback,
+      };
+    });
+  return {
+    cv10: {
+      folds: 10,
+      mape: m.mape,
+      median_ape: m.median_ape,
+      r2: m.r2,
+      spearman_held_out: spearman(held.map((h) => h.actualLog), held.map((h) => h.predLog)),
+      hit_rate_within_2x: round4(hit2x),
+      median_abs_log_error: round4(medianAbs),
+      q90_log: round4(Math.log10(q90FactorOf(absErrs) ?? 1)),
+      q90_factor: round4(q90FactorOf(absErrs) ?? 1),
+    },
+    held,
+    conformal_kinds,
+  };
+}
+
+/** Older-to-newer: fit on the earlier-listed half of the dated live side, test on the later half. */
+function olderToNewer(live: LiveFeat[], asOf: string, high: Set<string>): SplitResult {
+  const dated = live.filter((r) => r.p.listed_at !== null).sort((a, b) => (a.p.listed_at! < b.p.listed_at! ? -1 : 1));
+  const cut = Math.floor(dated.length / 2);
+  const train = dated.slice(0, cut);
+  const test = dated.slice(cut);
+  const f = fitOn(train, high);
+  const held: HeldOut[] = test.map((r) => {
+    const pred = fittedLog10(f, r.p, asOf, high).log;
+    return { p: r.p, fold: -1, logErr: pred - r.logMcap, ape: Math.abs(10 ** pred - 10 ** r.logMcap) / 10 ** r.logMcap, predLog: pred, actualLog: r.logMcap };
+  });
+  const m = splitMetrics(held);
+  return { name: 'older-to-newer', n_train: train.length, n_test: test.length, ...m };
+}
+
+/** Tier-stratified holdout: fit on one TVL tier, test on the next tier up. */
+function tierHoldout(live: LiveFeat[], asOf: string, high: Set<string>, fromTier: string, toTier: string): SplitResult {
+  const train = live.filter((r) => tvlTier(r.p.tvl_usd) === fromTier);
+  const test = live.filter((r) => tvlTier(r.p.tvl_usd) === toTier);
+  const f = fitOn(train, high);
+  const held: HeldOut[] = test.map((r) => {
+    const pred = fittedLog10(f, r.p, asOf, high).log;
+    return { p: r.p, fold: -1, logErr: pred - r.logMcap, ape: Math.abs(10 ** pred - 10 ** r.logMcap) / 10 ** r.logMcap, predLog: pred, actualLog: r.logMcap };
+  });
+  const m = splitMetrics(held);
+  return { name: `${fromTier} -> ${toTier}`, n_train: train.length, n_test: test.length, ...m };
+}
+
+export function fitModel(snapshot: Snapshot): { fit: Fit; live: LiveFeat[]; high: Set<string> } {
   const live = liveFeatures(snapshot);
-  const f = fitOn(live);
+  const { high, fieldMedian } = groupSets(live);
+  const f = fitOn(live, high);
   const y = live.map((r) => r.logMcap);
-  const pred = live.map((r) => fittedLog10(f, r.p, snapshot.as_of).log);
-  const cv = crossValidate(live, snapshot.as_of);
+  const pred = live.map((r) => fittedLog10(f, r.p, snapshot.as_of, high).log);
+  const { cv10, conformal_kinds } = crossValidate10(live, snapshot.as_of, high);
+  const splits: SplitResult[] = [
+    { name: '10-fold by slug', n_train: live.length, n_test: live.length, mape: cv10.mape, median_ape: cv10.median_ape, r2_log: cv10.r2 },
+    olderToNewer(live, snapshot.as_of, high),
+    tierHoldout(live, snapshot.as_of, high, '$5-50M', '$50-500M'),
+    tierHoldout(live, snapshot.as_of, high, '$50-500M', '>$500M'),
+  ];
+  const single = fitSingleSlope(live);
   const fit: Fit = {
     n_live: live.length,
-    slope: round6(f.slope),
+    slope_low: round6(f.slopeLow),
+    slope_high: round6(f.slopeHigh),
+    group_shift: round6(f.groupShift),
     intercept: round6(f.intercept),
     r2_in_sample: round4(r2Of(y, pred)),
     resid_coefs: [round6(f.residCoefs[0]), round6(f.residCoefs[1]), round6(f.residCoefs[2])],
     shrink_k: SHRINK_K,
     cat_intercepts: Object.fromEntries([...f.catIntercepts.entries()].map(([k, v]) => [k, round6(v)])),
     cat_n: Object.fromEntries(f.catN.entries()),
-    cv,
+    group_high_categories: [...high].sort(),
+    field_median_log_multiple: round4(fieldMedian),
+    single_slope: single,
+    cv10,
+    splits,
+    conformal_kinds,
     cv_baseline: baselineCv(live),
   };
-  return { fit, live };
+  return { fit, live, high };
 }
 
 /**
@@ -446,10 +775,10 @@ export function fitModel(snapshot: Snapshot): { fit: Fit; live: LiveFeat[] } {
  * the fitted model must earn its keep against the simplest honest model, on held-out data.
  */
 function baselineCv(live: LiveFeat[]): { mape: number; median_ape: number } {
-  const folds: LiveFeat[][] = [[], [], [], [], []];
-  live.forEach((r, i) => folds[i % 5]!.push(r));
+  const folds: LiveFeat[][] = Array.from({ length: 10 }, () => []);
+  live.forEach((r, i) => folds[i % 10]!.push(r));
   const apes: number[] = [];
-  for (let fold = 0; fold < 5; fold++) {
+  for (let fold = 0; fold < 10; fold++) {
     const test = folds[fold]!;
     const train = folds.flatMap((f, i) => (i === fold ? [] : f));
     const byCat = new Map<string, number[]>();
@@ -539,26 +868,36 @@ export interface Scored {
   adj: [number, number, number];
   age: number | null;
   growthPct: number;
+  kind: string;
+  kindFactor: number;
+  group: 'high' | 'low';
 }
 
 export function scoreProtocol(
   p: SnapshotProtocol,
   asOf: string,
   f: Fitted,
-  q90Factor: number,
+  high: Set<string>,
+  kindFactorFor: (kind: string, group: 'high' | 'low') => number,
 ): Scored {
   const age = ageDays(asOf, p.listed_at);
-  const { log, adj, cat } = fittedLog10(f, p, asOf);
+  const { log, adj, cat } = fittedLog10(f, p, asOf, high);
   const implied = Math.max(1, Math.round(10 ** log));
+  const group = groupOf(p, high);
+  const kind = kindOf(p, high);
+  const kindFactor = kindFactorFor(kind, group);
   return {
     implied,
-    low: Math.max(1, Math.round(implied / q90Factor)),
-    high: Math.round(implied * q90Factor),
+    low: Math.max(1, Math.round(implied / kindFactor)),
+    high: Math.round(implied * kindFactor),
     multiple: round4(implied / p.tvl_usd),
     cat: round6(cat),
     adj: [round6(adj[0]), round6(adj[1]), round6(adj[2])],
     age,
     growthPct: clip(finite(p.change_7d, 0), -30, 60),
+    kind,
+    kindFactor: round4(kindFactor),
+    group,
   };
 }
 
@@ -568,6 +907,21 @@ export function tierOf(implied: number): string {
   if (implied >= 75_000_000) return 'B';
   if (implied >= 20_000_000) return 'C';
   return 'D';
+}
+
+/** The farm verdict, a rule from the row's own figures: net expected value over farm cost. */
+export const VERDICT_POOL_SHARE = 0.05; // assumed airdrop pool, as a share of implied value
+export const VERDICT_USER_SHARE = 0.001; // assumed share of that pool one farmer captures
+
+export function verdictFor(oddsRate: number, implied: number, farmCost: number): {
+  verdict: 'STRONG FARM' | 'FARM' | 'SPECULATIVE' | 'PASS';
+  netEv: number;
+  ret: number;
+} {
+  const netEv = oddsRate * implied * VERDICT_POOL_SHARE * VERDICT_USER_SHARE;
+  const ret = farmCost > 0 ? netEv / farmCost : 0;
+  const verdict = ret >= 3 ? 'STRONG FARM' : ret >= 1 ? 'FARM' : ret >= 0.3 ? 'SPECULATIVE' : 'PASS';
+  return { verdict, netEv: Math.round(netEv), ret: round4(ret) };
 }
 
 // ------------------------------------------------------------ farm economics
@@ -772,8 +1126,11 @@ export function driversFor(p: SnapshotProtocol, s: Scored, oddsPct: number, slop
   return `${parts.join('; ')}.`;
 }
 
-export function buildBoard(snapshot: Snapshot, fitted: Fitted, fit: Fit, odds: OddsCell[]): BoardRow[] {
-  const q90Factor = fit.cv.q90_factor;
+export function buildBoard(snapshot: Snapshot, fitted: Fitted, fit: Fit, odds: OddsCell[], high: Set<string>): BoardRow[] {
+  const kindFactorFor = (kind: string, group: 'high' | 'low'): number => {
+    const found = fit.conformal_kinds.find((k) => k.kind === kind);
+    return found === undefined ? fit.cv10.q90_factor : found.q90_factor;
+  };
   const index = new Map(snapshot.protocols.map((p) => [p.slug, p]));
   const watch = new Set(snapshot.watchlist);
 
@@ -793,7 +1150,7 @@ export function buildBoard(snapshot: Snapshot, fitted: Fitted, fit: Fit, odds: O
   }
 
   const scored = [...chosen.values()].map((p) => {
-    const s = scoreProtocol(p, snapshot.as_of, fitted, q90Factor);
+    const s = scoreProtocol(p, snapshot.as_of, fitted, high, kindFactorFor);
     const cell = oddsFor(p, snapshot.as_of, odds);
     return { p, s, cell };
   });
@@ -803,7 +1160,10 @@ export function buildBoard(snapshot: Snapshot, fitted: Fitted, fit: Fit, odds: O
     const { p, s, cell } = entry;
     const capital = capitalFor(p);
     const gas = gasFor(chainOf(p)) * 6;
+    const farmCost = capital + 20 + gas;
     const oddsPct = cell.rate * 100;
+    const v = verdictFor(cell.rate, s.implied, farmCost);
+    const slope = s.group === 'high' ? fit.slope_high : fit.slope_low;
     return {
       rank: i + 1,
       slug: p.slug,
@@ -820,6 +1180,9 @@ export function buildBoard(snapshot: Snapshot, fitted: Fitted, fit: Fit, odds: O
       implied_value_usd: s.implied,
       implied_low_usd: s.low,
       implied_high_usd: s.high,
+      kind: s.kind,
+      kind_factor: s.kindFactor,
+      group: s.group,
       tier: tierOf(s.implied),
       multiple: s.multiple,
       cat_intercept: s.cat,
@@ -830,24 +1193,31 @@ export function buildBoard(snapshot: Snapshot, fitted: Fitted, fit: Fit, odds: O
       odds_n: cell.n,
       odds_token: cell.token,
       expected_value_usd: Math.round(s.implied * cell.rate),
+      verdict: v.verdict,
+      net_ev_usd: v.netEv,
+      farm_return: v.ret,
       farm_capital_usd: capital,
       farm_gas_usd: gas,
-      farm_total_cost_usd: capital + 20 + gas,
+      farm_total_cost_usd: farmCost,
       farm_days: holdDaysFor(s.age),
-      drivers: driversFor(p, s, oddsPct, fit.slope),
+      drivers: driversFor(p, s, oddsPct, slope),
       farm_steps: farmPlan(p, s.age).map(stepText),
     };
   });
 }
 
-/** The live-token protocols, by market cap, shown beside the board at the market's own valuation. */
-export function liveRows(snapshot: Snapshot, fitted: Fitted): LiveRow[] {
+/** The live-token protocols, all 128 of them, shown beside the board at the market's own valuation. */
+export function liveRows(snapshot: Snapshot, fitted: Fitted, high: Set<string>): LiveRow[] {
   return snapshot.protocols
     .filter((p) => !isPreToken(p) && p.tvl_usd > 0 && p.mcap_usd !== null && p.mcap_usd > 0)
     .sort((a, b) => (b.mcap_usd as number) - (a.mcap_usd as number) || b.tvl_usd - a.tvl_usd)
-    .slice(0, 40)
     .map((p) => {
-      const fittedMcap = Math.round(10 ** fittedLog10(fitted, p, snapshot.as_of).log);
+      const fittedMcap = Math.round(10 ** fittedLog10(fitted, p, snapshot.as_of, high).log);
+      const multiple = p.mcap_usd === null ? null : Math.round(((p.mcap_usd as number) / p.tvl_usd) * 100) / 100;
+      const logErr = p.mcap_usd === null ? null : round4(Math.log10(fittedMcap) - Math.log10(p.mcap_usd));
+      // Outliers by the market's own multiple, never by name: a token trading at ten times
+      // its TVL or at a tenth of it is a flow or CEX balance sheet, not a DeFi multiple.
+      const outlierTag = multiple === null ? '' : multiple >= 10 ? 'high-multiple outlier' : multiple <= 0.1 ? 'low-multiple outlier' : '';
       return {
         slug: p.slug,
         name: p.name,
@@ -857,20 +1227,83 @@ export function liveRows(snapshot: Snapshot, fitted: Fitted): LiveRow[] {
         mcap_usd: p.mcap_usd,
         change_7d: p.change_7d,
         // The ratio as the market set it, not the model's fitted copy of it: this table is the evidence.
-        multiple: p.mcap_usd === null ? null : Math.round(((p.mcap_usd as number) / p.tvl_usd) * 100) / 100,
+        multiple,
         fitted_mcap_usd: fittedMcap,
         ape: p.mcap_usd === null ? null : round4(Math.abs(fittedMcap - p.mcap_usd) / p.mcap_usd),
+        log_error: logErr,
+        outlier_tag: outlierTag,
       };
     });
 }
 
+/** Whether the Laplace-smoothed launch odds fall with age in every TVL tier (they do not here). */
+export function oddsAgeMonotone(odds: OddsCell[]): boolean {
+  const tiers: Array<'$5-50M' | '$50-500M' | '>$500M'> = ['$5-50M', '$50-500M', '>$500M'];
+  for (const tier of tiers) {
+    const rates = (['<1y', '1-2y', '>2y'] as const).map(
+      (b) => odds.find((c) => c.age_bucket === b && c.tvl_tier === tier)?.rate ?? 0,
+    );
+    if (!(rates[0]! >= rates[1]! && rates[1]! >= rates[2]!)) return false;
+  }
+  return true;
+}
+
+/** The 758 accounting: count every protocol in the snapshot by what happened to it. */
+export function buildAccounting(snapshot: Snapshot): Accounting {
+  let preTokenScored = 0;
+  let liveFitted = 0;
+  let listedNoMcap = 0;
+  let byCategory = 0;
+  let byVersion = 0;
+  let byProductWord = 0;
+  let byExchange = 0;
+  let mcapZeroOrNeg = 0;
+  for (const p of snapshot.protocols) {
+    if (p.mcap_usd !== null && p.mcap_usd > 0) {
+      liveFitted += 1;
+      continue;
+    }
+    if (p.mcap_usd !== null && p.mcap_usd <= 0) {
+      mcapZeroOrNeg += 1;
+      continue;
+    }
+    // mcap_usd is null from here on.
+    if (!isPreToken(p)) {
+      listedNoMcap += 1;
+      continue;
+    }
+    if (isCandidate(p)) {
+      preTokenScored += 1;
+      continue;
+    }
+    // Pre-token but screened out: first matching reason, in the screen's own order.
+    if (p.category !== null && PRODUCT_CATEGORIES.has(p.category)) byCategory += 1;
+    else if (VERSIONED.test(p.name)) byVersion += 1;
+    else if (PRODUCT_WORD.test(p.name)) byProductWord += 1;
+    else if (EXCHANGE_PREFIX.test(p.name)) byExchange += 1;
+    else byCategory += 1; // unreachable by construction; kept so the parts sum to the whole
+  }
+  return {
+    total: snapshot.protocols.length,
+    pre_token_scored: preTokenScored,
+    live_token_fitted: liveFitted,
+    listed_no_mcap: listedNoMcap,
+    pre_token_screened_out: byCategory + byVersion + byProductWord + byExchange,
+    screened_by_category: byCategory,
+    screened_by_version: byVersion,
+    screened_by_product_word: byProductWord,
+    screened_by_exchange_name: byExchange,
+    mcap_zero_or_negative: mcapZeroOrNeg,
+  };
+}
+
 export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: RadarData } {
-  const { fit } = fitModel(snapshot);
+  const { fit, high } = fitModel(snapshot);
   const live = liveFeatures(snapshot);
-  const fitted = fitOn(live);
+  const fitted = fitOn(live, high);
   const odds = buildOdds(snapshot);
-  const board = buildBoard(snapshot, fitted, fit, odds);
-  const liveRowsOut = liveRows(snapshot, fitted);
+  const board = buildBoard(snapshot, fitted, fit, odds, high);
+  const liveRowsOut = liveRows(snapshot, fitted, high);
   const ages = board.map((r) => r.age_days).filter((a): a is number => a !== null).sort((a, b) => a - b);
   const medianAge = ages.length === 0 ? null : ages[Math.floor(ages.length / 2)]!;
   const radar: RadarData = {
@@ -885,6 +1318,8 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     protocols_seen: snapshot.protocols.length,
     median_age_days: medianAge,
     total_implied_usd: board.reduce((n, r) => n + r.implied_value_usd, 0),
+    accounting: buildAccounting(snapshot),
+    odds_age_monotone: oddsAgeMonotone(odds),
     fit,
     odds,
     rows: board.map((r) => ({ ...r, model_ok: true })),

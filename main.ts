@@ -63,26 +63,44 @@ const meta = {
   early_below_floor: radar.early_size,
   live_token_protocols: radar.live_size,
   protocols_in_snapshot: radar.protocols_seen,
-  // radar-3: the fitted log-log model, measured from the snapshot's live side, not assumed.
+  // radar-4: two fitted slopes (high/low multiple groups), per-kind conformal intervals,
+  // three held-out validation splits, verdict rule, and the 758 accounting — all measured.
   fitted_model: {
     n_live: radar.fit.n_live,
-    slope_log10_mcap_on_log10_tvl: radar.fit.slope,
+    slope_low_log10_mcap_on_log10_tvl: radar.fit.slope_low,
+    slope_high_log10_mcap_on_log10_tvl: radar.fit.slope_high,
+    group_shift_high_dex: radar.fit.group_shift,
     intercept: radar.fit.intercept,
     r2_in_sample_log: radar.fit.r2_in_sample,
     resid_coefs_growth_logage_chains: radar.fit.resid_coefs,
     category_intercept_shrink_k: radar.fit.shrink_k,
+    group_high_categories: radar.fit.group_high_categories,
+    field_median_log_multiple: radar.fit.field_median_log_multiple,
+    single_slope_radar3: radar.fit.single_slope,
   },
-  held_out_validation_5fold_by_slug: {
-    mape: radar.fit.cv.mape,
-    median_ape: radar.fit.cv.median_ape,
-    r2_log: radar.fit.cv.r2,
-    conformal_q90_log: radar.fit.cv.q90_log,
-    conformal_q90_factor: radar.fit.cv.q90_factor,
-    interval_width_factor: radar.fit.cv.interval_width_factor,
+  held_out_validation: {
+    cv10_by_slug: {
+      mape: radar.fit.cv10.mape,
+      median_ape: radar.fit.cv10.median_ape,
+      r2_log: radar.fit.cv10.r2,
+      spearman_held_out: radar.fit.cv10.spearman_held_out,
+      hit_rate_within_2x: radar.fit.cv10.hit_rate_within_2x,
+      median_abs_log_error: radar.fit.cv10.median_abs_log_error,
+      global_q90_factor: radar.fit.cv10.q90_factor,
+    },
+    splits: radar.fit.splits,
+    baseline_median_multiple_cv10: radar.fit.cv_baseline,
   },
-  interval_method: '90% conformal: implied / F to implied * F, F from the 5-fold held-out absolute log errors',
-  odds_method: 'Laplace-smoothed token rate by age bucket x TVL tier, (token + 1) / (n + 2); see odds in data.js',
-  multiple_basis: 'fitted log10(mcap) on log10(TVL) with a shrunk per-category intercept, not a median ratio',
+  conformal_kinds: radar.fit.conformal_kinds,
+  interval_method: '90% split-conformal per kind (high/low multiple group x TVL tier) from 10-fold held-out absolute log errors; a kind with fewer than 10 held-out errors falls back to its group factor, then the global one',
+  odds_method: 'Laplace-smoothed token rate by age bucket x TVL tier, (token + 1) / (n + 2); see odds in data.js. Odds do NOT fall monotonically with age in this snapshot (odds_age_monotone=false); the counts are shown and no decline is forced',
+  odds_age_monotone: radar.odds_age_monotone,
+  verdict_rule: 'net EV = odds x implied x 0.05 (assumed airdrop pool share of implied) x 0.001 (assumed share of the pool one farmer captures); return = net EV / farm total cost; STRONG FARM >= 3x, FARM >= 1x, SPECULATIVE >= 0.3x, else PASS',
+  verdict_counts: Object.fromEntries(
+    ['STRONG FARM', 'FARM', 'SPECULATIVE', 'PASS'].map((v) => [v, board.filter((r) => r.verdict === v).length]),
+  ),
+  accounting_758: radar.accounting,
+  multiple_basis: 'fitted log10(mcap) on log10(TVL) with two slopes by multiple group and a shrunk per-category intercept, not a median ratio',
 };
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board, meta }, null, 0)}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
@@ -124,11 +142,14 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 const top = board[0]!;
 const fit = radar.fit;
+const acc = radar.accounting;
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols read, ${snapshot.watchlist.length} on the watchlist, ` +
     `${board.length} pre-token rows scored (${radar.early_size} below the floor, ${radar.live_size} live-token protocols set aside)\n` +
-    `token radar: radar-3 fit on ${fit.n_live} live protocols: log10(mcap) = ${fit.intercept} + ${fit.slope} x log10(TVL), R2 ${fit.r2_in_sample}\n` +
-    `token radar: held-out 5-fold: MAPE x${fit.cv.mape}, median error ${(fit.cv.median_ape * 100).toFixed(1)}%, 90% range factor x${fit.cv.q90_factor}\n` +
-    `token radar: rank 1 is ${top.name} at $${top.implied_value_usd.toLocaleString('en-US')} implied, ${top.multiple}x its TVL, ${top.odds_pct}% launch odds\n` +
+    `token radar: accounting: ${acc.pre_token_scored} scored + ${acc.live_token_fitted} live fitted + ${acc.listed_no_mcap} listed with no market cap + ${acc.pre_token_screened_out} pre-token screened out + ${acc.mcap_zero_or_negative} market cap zero or negative = ${acc.total}\n` +
+    `token radar: radar-4 fit on ${fit.n_live} live protocols: log10(mcap) = ${fit.intercept} + ${fit.slope_low} x log10(TVL) (low group) / ${fit.slope_high} x log10(TVL) (high group, shift ${fit.group_shift} dex), R2 ${fit.r2_in_sample}\n` +
+    `token radar: held-out 10-fold: MAPE x${fit.cv10.mape}, median error ${(fit.cv10.median_ape * 100).toFixed(1)}%, R2 ${fit.cv10.r2}, Spearman ${fit.cv10.spearman_held_out}\n` +
+    `token radar: rank 1 is ${top.name} at $${top.implied_value_usd.toLocaleString('en-US')} implied, ${top.multiple}x its TVL, ${top.odds_pct}% launch odds, verdict ${top.verdict}\n` +
+    `token radar: verdicts: ${['STRONG FARM', 'FARM', 'SPECULATIVE', 'PASS'].map((v) => `${v} ${board.filter((r) => r.verdict === v).length}`).join(', ')}\n` +
     `token radar: wrote board.json, data.js, dashboard/ (3 files), screenshots/ (${shots.length} images) and dossier.json to ${out}\n`,
 );

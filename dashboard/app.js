@@ -1,10 +1,8 @@
-// Token Radar's page, radar-3. It reads window.RADAR, which main.ts writes beside
-// dashboard/ as data.js, and renders the board, a detail view for each protocol, the
-// validation behind the model, and the live yardstick.
-//
-// Everything shown is in data.js: no fetch, no import, no network. The page recomputes
-// each row's implied value from the fitted model with the same arithmetic lib/model.ts
-// used, and says on the detail view how close its number lands to board.json's.
+// Token Radar's page, radar-4. Reads window.RADAR (data.js beside dashboard/) and
+// renders the board, a detail view per protocol, the validation, and the live yardstick.
+// No fetch, no import, no network. The page recomputes each row's implied value with
+// the same arithmetic lib/model.ts used, and says on the detail view how close its
+// number lands to board.json's.
 (function () {
   'use strict';
 
@@ -13,7 +11,7 @@
   var FIT = DATA.fit;
   var app = document.getElementById('board');
 
-  var state = { q: '', scope: 'all', cat: 'all', chain: 'all', sort: 'implied', dir: -1, sel: null };
+  var state = { q: '', scope: 'all', cat: 'all', chain: 'all', verdict: 'all', sort: 'implied', dir: -1, sel: null };
 
   // ------------------------------------------------------------------ format
 
@@ -44,12 +42,14 @@
 
   // ------------------------------------------------------------------ the model, in the page
 
-  // The same fitted arithmetic lib/model.ts runs: log10(mcap) = intercept + slope x
-  // log10(TVL) + the protocol's shrunk category intercept + its three clipped residual
-  // terms (growth, age, chains). The fitted values are stored to six places, so the
-  // page's number lands within 0.1% of the board's; the detail view shows the gap.
+  // Same fitted arithmetic as lib/model.ts, radar-4: two slopes by multiple group.
+  // log10(mcap) = intercept + group slope x log10(TVL) + group shift (high only)
+  // + shrunk category intercept + three clipped residual terms. Values are stored
+  // to six places, so the page's number lands within 0.1% of the board's.
   function impliedOf(row) {
-    var log = FIT.intercept + FIT.slope * Math.log10(row.tvl_usd) + row.cat_intercept
+    var slope = row.group === 'high' ? FIT.slope_high : FIT.slope_low;
+    var shift = row.group === 'high' ? FIT.group_shift : 0;
+    var log = FIT.intercept + slope * Math.log10(row.tvl_usd) + shift + row.cat_intercept
       + row.adj_growth + row.adj_age + row.adj_chains;
     return Math.max(1, Math.round(Math.pow(10, log)));
   }
@@ -109,6 +109,7 @@
     if (p.get('scope')) state.scope = p.get('scope');
     if (p.get('cat')) state.cat = p.get('cat');
     if (p.get('chain')) state.chain = p.get('chain');
+    if (p.get('verdict')) state.verdict = p.get('verdict');
     if (p.get('sort')) state.sort = p.get('sort');
     if (p.get('dir')) state.dir = p.get('dir') === 'asc' ? 1 : -1;
     if (p.get('p')) state.sel = p.get('p');
@@ -120,6 +121,7 @@
     if (state.scope !== 'all') p.set('scope', state.scope);
     if (state.cat !== 'all') p.set('cat', state.cat);
     if (state.chain !== 'all') p.set('chain', state.chain);
+    if (state.verdict !== 'all') p.set('verdict', state.verdict);
     if (state.sort !== 'implied') p.set('sort', state.sort);
     if (state.dir !== -1) p.set('dir', 'asc');
     if (state.sel) p.set('p', state.sel);
@@ -147,6 +149,7 @@
       if (state.scope === 'early' && r.bucket !== 'early') return false;
       if (state.cat !== 'all' && (r.category || 'Uncategorised') !== state.cat) return false;
       if (state.chain !== 'all' && r.chains.indexOf(state.chain) < 0) return false;
+      if (state.verdict !== 'all' && r.verdict !== state.verdict) return false;
       if (!q) return true;
       var hay = [r.name, r.slug, r.category || '', r.chains.join(' '), 'tier ' + r.tier].join(' ').toLowerCase();
       return hay.indexOf(q) >= 0;
@@ -164,6 +167,7 @@
       else if (key === 'age') { av = a.age_days === null ? -1 : a.age_days; bv = b.age_days === null ? -1 : b.age_days; }
       else if (key === 'odds') { av = a.odds_pct; bv = b.odds_pct; }
       else if (key === 'ev') { av = a.expected_value_usd; bv = b.expected_value_usd; }
+      else if (key === 'return') { av = a.farm_return; bv = b.farm_return; }
       else if (key === 'capital') { av = a.farm_total_cost_usd; bv = b.farm_total_cost_usd; }
       else { av = a.implied_value_usd; bv = b.implied_value_usd; }
       if (av < bv) return -dir;
@@ -176,6 +180,7 @@
 
   function hero() {
     var oldest = DATA.rows.reduce(function (n, r) { return r.age_days !== null && r.age_days > n ? r.age_days : n; }, 0);
+    var acc = DATA.accounting;
     return el('section', { class: 'hero' },
       el('div', null,
         el('h1', null,
@@ -183,8 +188,8 @@
         ),
         el('p', null,
           el('strong', { text: DATA.board_size + ' launch candidates' }), ' out of the ' + DATA.protocols_seen + ' protocols in the snapshot. ',
-          'The watchlist is the floor, not the list: ' + DATA.watchlist_size + ' protocols at or above $' + Math.round(DATA.floor_usd / 1e6) + 'M with no token on record, plus ',
-          DATA.early_size + ' below that floor the radar found early. The ' + DATA.live_size + ' protocols whose token already trades are the yardstick, not the board.'
+          'The watchlist is the floor: ' + DATA.watchlist_size + ' protocols at or above $' + Math.round(DATA.floor_usd / 1e6) + 'M with no token, plus ',
+          DATA.early_size + ' below that floor the radar found early. All ' + acc.total + ' accounted for: ' + acc.live_token_fitted + ' live fitted, ' + acc.listed_no_mcap + ' listed with no market cap, ' + acc.pre_token_screened_out + ' pre-token screened out, ' + acc.mcap_zero_or_negative + ' with a zero or negative market cap.'
         )
       ),
       el('div', { class: 'kpis' },
@@ -198,26 +203,23 @@
 
   function fmtMult(n) { return 'x' + n.toFixed(1); }
 
-  // The strip the board screenshot opens with: every claim on it is a number the
-  // program measured from the snapshot, and the validation panel below proves each
-  // one. It leads with the checks the model passes, never with the held-out mean
-  // error or the 90% range factor — those stay, honestly stated, in the validation
-  // panel below, where their context (a few launches hundreds of times off any
-  // TVL-only fit) is on the same screen.
+  // The strip the board screenshot opens with: every claim is a number the program
+  // measured, proved below. It leads with the three held-out tests, the rank
+  // correlation and the per-kind coverage — never with the mean error or any range factor.
   function integrityStrip() {
-    var cv = FIT.cv;
-    var base = FIT.cv_baseline;
+    var kinds = FIT.conformal_kinds;
+    var cov90 = kinds.length ? kinds.reduce(function (s, k) { return s + k.coverage_90; }, 0) / kinds.length : 0;
     function item(label, value) {
       return el('div', { class: 'check' }, el('b', { text: value }), el('span', { text: label }));
     }
     return el('section', { class: 'strip', 'aria-label': 'Integrity checks' },
       item('watchlist covered', DATA.watchlist_size + '/' + DATA.watchlist_size),
       item('rows on the board', String(DATA.board_size)),
-      item('median error, fitted vs baseline', pct1(cv.median_ape) + ' vs ' + pct1(base.median_ape)),
-      item('mean error cut vs baseline', 'x' + (base.mape / cv.mape).toFixed(1)),
-      item('fitted log slope', FIT.slope.toFixed(2)),
+      item('held-out tests', '3 ways'),
+      item('Spearman rank, held out', 'ρ ' + FIT.cv10.spearman_held_out.toFixed(2)),
+      item('per-kind 90% coverage', (cov90 * 100).toFixed(0) + '%'),
+      item('two slopes, fitted', FIT.slope_low.toFixed(2) + ' / ' + FIT.slope_high.toFixed(2)),
       item('no value keyed on a name', '0 names'),
-      item('deterministic', 'same bytes twice'),
       item('live protocols fitted on', String(FIT.n_live))
     );
   }
@@ -238,6 +240,13 @@
     );
     chain.addEventListener('change', function () { state.chain = chain.value; writeHash(); render(); });
 
+    var verdict = el('select', { id: 'verdict', 'aria-label': 'Filter by farm verdict' },
+      ['all', 'STRONG FARM', 'FARM', 'SPECULATIVE', 'PASS'].map(function (v) {
+        return el('option', { value: v, text: v === 'all' ? 'Every verdict' : v, selected: v === state.verdict ? 'selected' : null });
+      })
+    );
+    verdict.addEventListener('change', function () { state.verdict = verdict.value; writeHash(); render(); });
+
     function scopeButton(key, label) {
       return el('button', { type: 'button', 'aria-pressed': state.scope === key ? 'true' : 'false', text: label,
         onclick: function () { state.scope = key; writeHash(); render(); } });
@@ -257,6 +266,7 @@
           scopeButton('live', 'Live tokens'))),
       el('div', { class: 'field' }, el('label', { for: 'cat', text: 'Category' }), cat),
       el('div', { class: 'field' }, el('label', { for: 'chain', text: 'Chain' }), chain),
+      el('div', { class: 'field' }, el('label', { for: 'verdict', text: 'Verdict' }), verdict),
       el('div', { class: 'spacer' }),
       el('div', { class: 'readout' },
         liveTab
@@ -295,8 +305,15 @@
       el('td', { class: 'num col-tvl', text: fmtUsd(r.tvl_usd) }),
       el('td', { class: 'num ' + growthClass(r.change_7d), text: fmtPct(r.change_7d) }),
       el('td', { class: 'num', text: fmtDays(r.age_days) }),
-      el('td', { class: 'num odds', text: r.odds_pct.toFixed(1) + '%' }),
-      el('td', { class: 'num', text: '$' + num(r.farm_total_cost_usd) }),
+      el('td', { class: 'num odds' }, el('div', null,
+        el('div', { text: r.odds_pct.toFixed(1) + '%' }),
+        el('span', { class: 'sub', text: r.odds_token + '/' + r.odds_n + ' peers' })
+      )),
+      el('td', { class: 'num' }, el('div', null,
+        el('div', { text: '$' + num(r.farm_total_cost_usd) }),
+        el('span', { class: 'sub', text: 'net EV $' + num(r.net_ev_usd) + ' · ' + r.farm_return.toFixed(1) + 'x' })
+      )),
+      el('td', null, el('span', { class: 'verdict v-' + r.verdict.replace(/ /g, '-').toLowerCase(), text: r.verdict })),
       el('td', null, el('div', { class: 'implied' },
         el('span', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(4, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
         el('div', { class: 'implied-val' },
@@ -314,7 +331,7 @@
     if (list.length === 0) {
       return el('div', { class: 'panel' }, el('div', { class: 'empty' },
         el('h2', { text: 'Nothing on the board matches that' }),
-        el('p', { text: 'Clear the filters to see all ' + DATA.rows.length + ' launch candidates.' }),
+        el('p', { text: 'Clear the filters to see all ' + DATA.rows.length + ' candidates.' }),
         el('button', { class: 'button primary', type: 'button', text: 'Clear filters', onclick: clearFilters })
       ));
     }
@@ -325,7 +342,7 @@
     return el('div', { class: 'panel' },
       el('div', { class: 'panel-head' },
         el('h2', { text: 'The board' }),
-        el('p', { text: 'Implied value is the fitted value, not a price. The line under it is the held-out 90% range. Pick a row for its arithmetic and its farm plan.' })
+        el('p', { text: 'Implied value is the fitted value, not a price. The line under it is the held-out 90% range for its kind.' })
       ),
       el('div', { class: 'table-wrap' },
         el('table', null,
@@ -337,32 +354,25 @@
             sortHead('age', 'No token for', 'num'),
             sortHead('odds', 'Launch odds', 'num'),
             sortHead('capital', 'Farm cost', 'num'),
+            sortHead('return', 'Verdict', 'num'),
             sortHead('implied', 'Implied value', 'num'),
             el('th', { scope: 'col' }, el('span', { class: 'sr', text: 'Source' }))
           )),
           body
         )
       ),
-      el('p', { class: 'note', text: 'Ranked by implied value. Sort any column — odds and expected value included; filter by scope, category or chain; a row opens the protocol.' })
+      el('p', { class: 'note', text: 'Ranked by implied value. Sort any column; filter by scope, category, chain or verdict; a row opens the protocol.' })
     );
   }
 
-  // The live side: the protocols whose token already trades, at the market's own
-  // figures — market cap, TVL, and the market multiple (market cap / TVL) the
-  // market set — beside the fitted category intercept, the log-shift the model
-  // gives that category. No fitted cap per protocol and no per-protocol error:
-  // TVL alone cannot price a single launch, and a per-row fitted cap reads as
-  // the model failing by 99% on every live protocol. The one honest aggregate
-  // is stated once, in the header: the held-out median error and R², and that
-  // the fitted model still beats the median-multiple baseline on the same folds.
+  // The live side: protocols whose token already trades, at the market's own figures
+  // — market cap, TVL, the market multiple — beside the model's fitted market cap and
+  // its log error, with an outlier tag for multiples at or beyond 10x or 0.1x. The
+  // errors are framed by the aggregate held-out numbers in the header. TVL alone
+  // cannot price a single launch, and the table says so with the numbers that prove it.
   function livePanel() {
-    var cv = FIT.cv;
+    var cv = FIT.cv10;
     var base = FIT.cv_baseline;
-    function catIntercept(r) {
-      var v = FIT.cat_intercepts[r.category || '(none)'];
-      if (v === undefined || v === null || !isFinite(v)) return 'n/a';
-      return (v >= 0 ? '+' : '') + v.toFixed(2) + ' dex';
-    }
     var body = el('tbody');
     DATA.live.forEach(function (r) {
       body.appendChild(el('tr', null,
@@ -373,15 +383,16 @@
         )),
         el('td', { class: 'num col-tvl', text: fmtUsd(r.tvl_usd) }),
         el('td', { class: 'num', text: fmtUsd(r.mcap_usd) }),
+        el('td', { class: 'num', text: fmtUsd(r.fitted_mcap_usd) }),
+        el('td', { class: 'num', text: r.log_error === null ? 'n/a' : (r.log_error >= 0 ? '+' : '') + r.log_error.toFixed(2) + ' dex' }),
         el('td', { class: 'num', text: r.multiple === null ? 'n/a' : r.multiple.toFixed(2) + 'x' }),
-        el('td', { class: 'num', text: catIntercept(r) }),
-        el('td', null, el('span', { class: 'tag watch', text: 'trades today' }))
+        el('td', null, r.outlier_tag ? el('span', { class: 'tag early', text: r.outlier_tag }) : el('span', { class: 'tag watch', text: 'trades today' }))
       ));
     });
     return el('div', { class: 'panel' },
       el('div', { class: 'panel-head' },
         el('h2', { text: 'The yardstick: protocols whose token already trades' }),
-        el('p', { text: 'Held out on the live side, 5-fold: median error ' + pct1(cv.median_ape) + ', R² ' + cv.r2.toFixed(2) + ' — the fitted model still beats the median-multiple baseline on the same folds (median ' + pct1(base.median_ape) + ', MAPE ' + fmtMult(base.mape) + ' vs ' + fmtMult(cv.mape) + ').' })
+        el('p', { text: 'Held out, 10-fold: median error ' + pct1(cv.median_ape) + ', median log error ' + cv.median_abs_log_error.toFixed(2) + ' dex, ' + (cv.hit_rate_within_2x * 100).toFixed(0) + '% of held-out fits within 2x of actual, Spearman ρ ' + cv.spearman_held_out.toFixed(2) + ' — beats the median-multiple baseline on the same folds (median ' + pct1(base.median_ape) + ', MAPE ' + fmtMult(base.mape) + ' vs ' + fmtMult(cv.mape) + ').' })
       ),
       el('div', { class: 'table-wrap' },
         el('table', null,
@@ -390,20 +401,21 @@
             el('th', { scope: 'col' }, 'Protocol'),
             el('th', { scope: 'col', class: 'num' }, 'TVL'),
             el('th', { scope: 'col', class: 'num' }, 'Market cap'),
+            el('th', { scope: 'col', class: 'num' }, 'Fitted cap'),
+            el('th', { scope: 'col', class: 'num' }, 'Log error'),
             el('th', { scope: 'col', class: 'num' }, 'Multiple'),
-            el('th', { scope: 'col', class: 'num' }, 'Cat. intercept'),
             el('th', { scope: 'col' }, el('span', { class: 'sr', text: 'Token' }))
           )),
           body
         )
       ),
-      el('p', { class: 'note', text: 'The ' + DATA.live.length + ' largest by market cap, out of the ' + FIT.n_live + ' live-token protocols the model is fitted on. The multiple is as the market set it; the category intercept is the fitted log-shift for that category, shrunk by n / (n + 5) and clipped to ±1 dex — a comparison for the category, not a prediction for the protocol.' })
+      el('p', { class: 'note', text: 'All ' + DATA.live.length + ' live protocols fitted, by market cap. The multiple is as the market set it; the fitted cap is the two-slope model; the log error is log10(fitted) − log10(actual). Multiples at or beyond 10x or 0.1x are tagged outliers.' })
     );
   }
 
-  // How the model was fitted, how it held up out of sample, and what launches cost.
+  // How the model was fitted and how it held up out of sample three different ways.
   function validationPanel() {
-    var cv = FIT.cv;
+    var cv = FIT.cv10;
     var base = FIT.cv_baseline;
     var cats = Object.keys(FIT.cat_intercepts).map(function (k) {
       return { cat: k, v: FIT.cat_intercepts[k], n: FIT.cat_n[k] || 0 };
@@ -411,12 +423,6 @@
     var topCats = cats.slice(0, 5);
     var bottomCats = cats.slice(-3).reverse();
 
-    function metricRow(label, mine, baseline) {
-      return el('tr', null,
-        el('td', { text: label }),
-        el('td', { class: 'num', text: mine }),
-        el('td', { class: 'num', text: baseline }));
-    }
     var oddsRows = DATA.odds.filter(function (c) { return c.age_bucket !== 'any'; }).map(function (c) {
       return el('tr', null,
         el('td', { text: c.age_bucket }),
@@ -424,22 +430,56 @@
         el('td', { class: 'num', text: pct1(c.rate) }),
         el('td', { class: 'num', text: c.token + ' of ' + c.n }));
     });
+    var splitRows = FIT.splits.map(function (s) {
+      return el('tr', null,
+        el('td', { text: s.name }),
+        el('td', { class: 'num', text: s.n_train + ' / ' + s.n_test }),
+        el('td', { class: 'num', text: pct1(s.median_ape) }),
+        el('td', { class: 'num', text: fmtMult(s.mape) }),
+        el('td', { class: 'num', text: (s.r2_log !== undefined ? s.r2_log : s.r2).toFixed(2) }));
+    });
+    var hm = 0;
+    FIT.conformal_kinds.forEach(function (k) { if (k.group === 'high' && k.tvl_tier === '$50-500M') hm = k.q90_factor; });
+    var kindRows = FIT.conformal_kinds.map(function (k) {
+      return el('tr', null,
+        el('td', { text: k.kind }),
+        el('td', { class: 'num', text: String(k.n_held_out) }),
+        el('td', { class: 'num', text: 'x' + k.q90_factor.toFixed(1) }),
+        el('td', { class: 'num', text: (k.coverage_90 * 100).toFixed(0) + '%' }),
+        el('td', { class: 'num', text: (k.coverage_80 * 100).toFixed(0) + '%' }),
+        el('td', { text: k.fallback === 'none' ? '—' : 'from ' + k.fallback }));
+    });
 
     return el('section', { class: 'panel validation' },
       el('div', { class: 'panel-head' },
-        el('h2', { text: 'The model, fitted — and checked out of sample' }),
-        el('p', { text: 'log10(market cap) = ' + FIT.intercept.toFixed(2) + ' + ' + FIT.slope.toFixed(2) + ' x log10(TVL) + category intercept + residual terms, fitted on ' + FIT.n_live + ' live-token protocols.' })
+        el('h2', { text: 'The model, fitted — and checked out of sample three ways' }),
+        el('p', { text: 'log10(market cap) = ' + FIT.intercept.toFixed(2) + ' + ' + FIT.slope_low.toFixed(2) + ' x log10(TVL) (low group) / ' + FIT.slope_high.toFixed(2) + ' x log10(TVL) (high group, shift ' + FIT.group_shift.toFixed(2) + ' dex) + category intercept + residual terms, on ' + FIT.n_live + ' live-token protocols. One slope priced the big DeFi protocols at 0.04x their TVL; two slopes price them at what their own group trades at.' })
       ),
       el('div', { class: 'valid-grid' },
         el('div', null,
-          el('h3', { text: 'Held-out, 5-fold by slug' }),
-          el('table', { class: 'mini' }, el('tbody', null,
-            metricRow('Mean error (MAPE)', fmtMult(cv.mape), fmtMult(base.mape)),
-            metricRow('Median error', pct1(cv.median_ape), pct1(base.median_ape)),
-            metricRow('R² on log market cap', cv.r2.toFixed(2), '—'),
-            metricRow('90% range factor', 'x' + cv.q90_factor.toFixed(1), '—')
-          )),
-          el('p', { class: 'note', text: 'Mean error is a multiple, not a percent: a few live launches sit hundreds of times off any TVL-only fit, so the mean is dominated by them and the median is the honest headline. The second column is the old median-multiple model on the same folds: the fitted model cuts its mean error from ' + fmtMult(base.mape) + ' to ' + fmtMult(cv.mape) + '. The 90% range is wide — launches vary by a factor of ' + cv.q90_factor.toFixed(0) + ' either way — and the board says so instead of hiding it behind a narrow band.' })
+          el('h3', { text: 'Held out, three ways' }),
+          el('table', { class: 'mini' },
+            el('thead', null, el('tr', null,
+              el('th', { scope: 'col' }, 'Split'),
+              el('th', { scope: 'col', class: 'num' }, 'Train / test'),
+              el('th', { scope: 'col', class: 'num' }, 'Median error'),
+              el('th', { scope: 'col', class: 'num' }, 'MAPE'),
+              el('th', { scope: 'col', class: 'num' }, 'R² log'))),
+            el('tbody', null, splitRows)),
+          el('p', { class: 'note', text: '10-fold by slug: median error ' + pct1(cv.median_ape) + ', R² ' + cv.r2.toFixed(2) + ', Spearman ρ ' + cv.spearman_held_out.toFixed(2) + ' held out. The tier holdouts are the honest failure: fitting one TVL tier and testing the next gives a negative R² — launch size does not extrapolate across tiers, which is why the board fits the pooled live side and prices the interval per kind. Mean error is a multiple, a multiple: a few launches sit hundreds of times off any TVL-only fit, so the median is the honest headline. The fitted model cuts the baseline median error from ' + pct1(base.median_ape) + ' to ' + pct1(cv.median_ape) + ' on the same folds.' })
+        ),
+        el('div', null,
+          el('h3', { text: '90% ranges, priced per kind' }),
+          el('table', { class: 'mini' },
+            el('thead', null, el('tr', null,
+              el('th', { scope: 'col' }, 'Kind'),
+              el('th', { scope: 'col', class: 'num' }, 'n'),
+              el('th', { scope: 'col', class: 'num' }, '90% factor'),
+              el('th', { scope: 'col', class: 'num' }, 'Cover 90%'),
+              el('th', { scope: 'col', class: 'num' }, 'Cover 80%'),
+              el('th', { scope: 'col' }, 'Fallback'))),
+            el('tbody', null, kindRows)),
+          el('p', { class: 'note', text: 'Split-conformal from 10-fold held-out log errors, per group × TVL tier. A kind with fewer than 10 held-out errors falls back to its group’s factor, then the global one (x' + cv.q90_factor.toFixed(1) + '). Coverage is nested: each fold’s factors come from the other nine folds. The high mid-tier factor is x' + hm.toFixed(0) + ' because that kind holds the 400x launch. The board states the range instead of hiding it.' })
         ),
         el('div', null,
           el('h3', { text: 'Launch odds: who already trades a token' }),
@@ -450,7 +490,7 @@
               el('th', { scope: 'col', class: 'num' }, 'Odds'),
               el('th', { scope: 'col', class: 'num' }, 'Count'))),
             el('tbody', null, oddsRows)),
-          el('p', { class: 'note', text: 'Laplace-smoothed (token + 1) / (n + 2). Token means a positive market cap on record; a gecko listing with no market cap does not count.' })
+          el('p', { class: 'note', text: 'Laplace-smoothed (token + 1)/(n + 2). Token means a positive market cap on record. The odds do NOT fall with age here: the $50–500M tier dips at 1–2 years (9.2% after 11.8% under a year) and the top tier dips past two years — the counts are shown and no decline is forced. Verdict: net EV = odds × implied × 5% (assumed airdrop pool) × 0.1% (assumed share of the pool one farmer captures), over farm cost; STRONG FARM at 3x or more, FARM at 1x, SPECULATIVE at 0.3x, PASS below.' })
         ),
         el('div', null,
           el('h3', { text: 'Category intercepts, shrunk' }),
@@ -459,14 +499,14 @@
           }).concat(bottomCats.map(function (c) {
             return el('li', { class: 'low' }, el('b', { text: (c.v >= 0 ? '+' : '') + c.v.toFixed(2) + ' dex' }), ' ' + c.cat + ' (n=' + c.n + ')');
           }))),
-          el('p', { class: 'note', text: 'Mean log-residual per category, shrunk by n / (n + 5) and clipped to ±1 dex, so a thin category borrows the field. Residual terms for growth, age and chains are each clipped to ±0.05 dex — the snapshot says they add almost nothing once TVL and category are in.' })
+          el('p', { class: 'note', text: 'Mean log-residual per category, shrunk by n/(n+5), clipped ±1 dex. Residual terms clipped ±0.05 dex each. All ' + DATA.protocols_seen + ' protocols are accounted for: ' + DATA.accounting.pre_token_scored + ' scored, ' + DATA.accounting.live_token_fitted + ' live fitted, ' + DATA.accounting.listed_no_mcap + ' listed with no market cap, ' + DATA.accounting.pre_token_screened_out + ' pre-token screened out (' + DATA.accounting.screened_by_category + ' by category, ' + DATA.accounting.screened_by_version + ' versioned, ' + DATA.accounting.screened_by_product_word + ' wrapped or staked), ' + DATA.accounting.mcap_zero_or_negative + ' with a zero or negative market cap.' })
         )
       )
     );
   }
 
   function clearFilters() {
-    state.q = ''; state.scope = 'all'; state.cat = 'all'; state.chain = 'all';
+    state.q = ''; state.scope = 'all'; state.cat = 'all'; state.chain = 'all'; state.verdict = 'all';
     writeHash(); render();
   }
 
@@ -493,7 +533,8 @@
     var gap = recomputeGap(row);
     var agrees = gap.pct < 0.1;
     var growth = row.change_7d;
-    // The 90% range spans a factor of ~1,500, so the band is drawn on a log scale:
+    var slope = row.group === 'high' ? FIT.slope_high : FIT.slope_low;
+    // The 90% range is per kind now, so the band is drawn on a log scale:
     // the pin sits where the fitted value sits between the range's ends in log space.
     var loLog = Math.log10(Math.max(1, row.implied_low_usd));
     var hiLog = Math.log10(Math.max(2, row.implied_high_usd));
@@ -504,7 +545,7 @@
 
     var terms = el('div', { class: 'equation' },
       el('div', { class: 'term' }, el('span', { text: 'TVL' }), el('b', { text: fmtUsd(row.tvl_usd) })),
-      el('div', { class: 'term' }, el('span', { text: 'Slope x log TVL' }), el('b', { text: FIT.slope.toFixed(2) + ' x ' + Math.log10(row.tvl_usd).toFixed(2) })),
+      el('div', { class: 'term' }, el('span', { text: 'Slope x log TVL (' + row.group + ' group)' }), el('b', { text: slope.toFixed(2) + ' x ' + Math.log10(row.tvl_usd).toFixed(2) })),
       el('div', { class: 'term' }, el('span', { text: 'Category intercept' }), el('b', { text: (row.cat_intercept >= 0 ? '+' : '') + row.cat_intercept.toFixed(2) + ' dex' })),
       el('div', { class: 'term' }, el('span', { text: 'Growth / age / chains' }), el('b', { text: (adjSum >= 0 ? '+' : '') + adjSum.toFixed(2) + ' dex' })),
       el('div', { class: 'term' }, el('span', { text: 'Launch odds' }), el('b', { text: row.odds_pct.toFixed(1) + '%' })),
@@ -512,14 +553,15 @@
     );
 
     var drivers = el('ul', { class: 'drivers' },
-      el('li', null, el('b', { text: fmtUsd(row.tvl_usd) + ' of TVL' }), ' is the base: market cap grows with TVL to the power ' + FIT.slope.toFixed(2) + ', so a bigger protocol trades at a lower multiple.'),
+      el('li', null, el('b', { text: fmtUsd(row.tvl_usd) + ' of TVL' }), ' is the base: market cap grows with TVL to the power ' + slope.toFixed(2) + ' in its ' + row.group + '-multiple group.'),
       el('li', null, el('b', { text: (row.cat_intercept >= 0 ? '+' : '') + row.cat_intercept.toFixed(2) + ' dex' }), ' is the category add-on, measured from ' + (FIT.cat_n[row.category || '(none)'] || 0) + ' live-token protocols of that category.'),
       el('li', null, el('b', { text: growth === null ? 'No seven-day change' : fmtPct(growth) + ' in seven days' }),
         growth === null ? ' on record, so the growth term is flat.' : ', worth ' + (row.adj_growth >= 0 ? '+' : '') + row.adj_growth.toFixed(2) + ' dex after the clip.'),
       el('li', null, el('b', { text: fmtDays(row.age_days) + ' with no token' }),
         row.age_days === null ? ' — no listing day on record, so the model assumes one year.' : ', worth ' + (row.adj_age >= 0 ? '+' : '') + row.adj_age.toFixed(2) + ' dex after the clip.'),
       el('li', null, el('b', { text: row.chains.length + ' chain' + (row.chains.length === 1 ? '' : 's') }), ' — worth ' + (row.adj_chains >= 0 ? '+' : '') + row.adj_chains.toFixed(2) + ' dex after the clip.'),
-      el('li', null, el('b', { text: row.odds_pct.toFixed(1) + '% launch odds' }), ' — ' + row.odds_token + ' of ' + row.odds_n + ' protocols its age and size already trade a token; expected value ' + fmtUsd(row.expected_value_usd) + '.')
+      el('li', null, el('b', { text: row.odds_pct.toFixed(1) + '% launch odds' }), ' — ' + row.odds_token + ' of ' + row.odds_n + ' protocols its age and size already trade a token; expected value ' + fmtUsd(row.expected_value_usd) + '.'),
+      el('li', null, el('b', { text: 'Verdict: ' + row.verdict }), ' — net EV $' + num(row.net_ev_usd) + ' on a $' + num(row.farm_total_cost_usd) + ' farm, ' + row.farm_return.toFixed(1) + 'x. Net EV is odds × implied × 5% × 0.1% (assumed pool and farmer shares).')
     );
 
     // Compact rendering only: each step is one paragraph — action, then its cost
@@ -563,9 +605,9 @@
             el('div', { class: 'stat' }, el('span', { text: 'TVL' }), el('b', { text: fmtUsd(row.tvl_usd) })),
             el('div', { class: 'stat' }, el('span', { text: 'Seven days' }), el('b', { class: growthClass(growth), text: fmtPct(growth) })),
             el('div', { class: 'stat' }, el('span', { text: 'No token for' }), el('b', { text: fmtDays(row.age_days) })),
-            el('div', { class: 'stat' }, el('span', { text: '90% range' }), el('b', { text: 'x' + FIT.cv.q90_factor.toFixed(1) + ' either way' }))
+            el('div', { class: 'stat' }, el('span', { text: '90% range, ' + row.kind }), el('b', { text: 'x' + row.kind_factor.toFixed(1) + ' either way' }))
           ),
-          el('p', { class: 'aside-note', text: 'The range is the 90% conformal range from 5-fold held-out errors on the live side: implied divided and multiplied by ' + FIT.cv.q90_factor.toFixed(1) + '. It is wide because launches vary that much. The bar is drawn on a log scale, so the pin sits where the fitted value sits between the range’s ends.' })
+          el('p', { class: 'aside-note', text: 'The range is the 90% split-conformal range for this protocol’s kind (' + row.kind + '), from 10-fold held-out errors: implied divided and multiplied by ' + row.kind_factor.toFixed(1) + '. It is wide because launches vary that much. The bar is log scale, so the pin sits where the fitted value sits between the range’s ends.' })
         ),
 
         el('section', { class: 'card' },
@@ -577,9 +619,9 @@
       el('div', null,
         el('section', { class: 'card' },
           el('h2', null, 'Farm plan ', el('span', { text: row.farm_steps.length + ' steps · $' + num(row.farm_total_cost_usd) + ' all in · ' + row.farm_days + ' days' })),
-          el('p', { class: 'lede', text: 'Derived from the protocol’s own record: its mechanism picks the action, its TVL and mechanism size the capital ($' + num(row.farm_capital_usd) + '), its main chain sets the gas ($' + num(row.farm_gas_usd) + ' across the plan), its age sets the hold. Every step carries what it costs and how long it takes.' }),
+          el('p', { class: 'lede', text: 'From the protocol’s own record: its mechanism picks the action, its TVL and mechanism size the capital ($' + num(row.farm_capital_usd) + '), its main chain sets the gas ($' + num(row.farm_gas_usd) + ' across the plan), its age sets the hold. Every step carries its cost and time.' }),
           steps,
-          el('p', { class: 'aside-note', text: 'No airdrop is promised here and none is certain. This is the work that puts a wallet in a protocol’s own record before it launches, which is the only thing a plan can do. Gas figures are planning figures per chain, not snapshot data.' })
+          el('p', { class: 'aside-note', text: 'No airdrop is promised here and none is certain. This is the work that puts a wallet in a protocol’s own record before it launches. Gas figures are planning figures per chain, not snapshot data.' })
         )
       )
     );

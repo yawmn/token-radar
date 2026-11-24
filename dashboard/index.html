@@ -33,8 +33,8 @@
 <footer class="foot">
   <div>
     <strong>How the implied value is built.</strong>
-    <code>log10(market cap) = intercept + slope x log10(TVL) + category intercept + growth, age and chain terms</code>
-    The slope and intercept are fitted by OLS on the 128 live-token protocols of this same snapshot; a category's intercept is its mean log-residual, shrunk by n / (n + 5). The 90% range is conformal, from 5-fold held-out errors. Launch odds are the Laplace-smoothed share of protocols of the same age and size that already trade a token.
+    <code>log10(market cap) = intercept + slope x log10(TVL) + group shift + category intercept + growth, age and chain terms</code>
+    Two slopes, fitted by OLS on the 128 live-token protocols of this snapshot: 0.64 for the low-multiple group, 0.42 for the high-multiple group (a category is high when its live median multiple sits at or above the field median). A category's intercept is its mean log-residual, shrunk by n / (n + 5). The 90% range is split-conformal per kind, from 10-fold held-out errors. Launch odds are the Laplace-smoothed share of protocols of the same age and size that already trade a token; the farm verdict is net expected value over farm cost, with the assumed 5% pool and 0.1% farmer share in the validation panel.
   </div>
   <div class="fine">
     Every figure comes from the sealed DefiLlama snapshot written beside this page; nothing is fetched, and no protocol is listed or ranked by name. An implied value is a model's claim, not a promise, and not make.fun's.
